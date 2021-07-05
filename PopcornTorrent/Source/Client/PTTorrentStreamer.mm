@@ -8,10 +8,10 @@
 #import <libtorrent/bencode.hpp>
 #import "CocoaSecurity.h"
 #import "PTTorrentStreamer+Protected.h"
-#import <GCDWebServer/GCDWebServer.h>
-#import <GCDWebServer/GCDWebServerFileRequest.h>
-#import <GCDWebServer/GCDWebServerFileResponse.h>
-#import <GCDWebServer/GCDWebServerPrivate.h>
+#import <GCDWebServer.h>
+//#import <GCDWebServer/GCDWebServerFileRequest.h>
+//#import <GCDWebServer/GCDWebServerFileResponse.h>
+//#import <GCDWebServer/GCDWebServerPrivate.h>
 #import <UIKit/UIApplication.h>
 #import "NSString+Localization.h"
 #import "PTSize.h"
