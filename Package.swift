@@ -23,22 +23,18 @@ let package = Package(
             path: "PopcornTorrent/Source",
             cSettings: [
                 .define("SWIFT_PACKAGE"),
-                .headerSearchPath("include/23")
             ],
             cxxSettings: [
-                .unsafeFlags(["-DBOOST_ASIO_ENABLE_CANCELIO"]),
-                .unsafeFlags(["-DBOOST_ASIO_HASH_MAP_BUCKETS=1021"]),
-                .unsafeFlags(["-DBOOST_FILESYSTEM_VERSION=3"]),
-                .unsafeFlags(["-DWITH_SHIPPED_GEOIP_H"]),
-                .unsafeFlags(["-DTORRENT_USE_TOMMATH"]),
-                .unsafeFlags(["-DBOOST_ASIO_SEPARATE_COMPILATION"]),
-                .unsafeFlags(["-DTORRENT_BUILDING_STATIC"]),
-                .headerSearchPath("./include/*"),
-                .unsafeFlags(["-I", "./include/"]),
-                .unsafeFlags(["-I", "/usr/include/net", "-I", "/usr/include/netinet/"]),
-                .unsafeFlags(["-std=c++11"]),
+                .define("BOOST_ASIO_ENABLE_CANCELIO"),
+                .define("BOOST_ASIO_HASH_MAP_BUCKETS", to: "1021"),
+                .define("BOOST_FILESYSTEM_VERSION", to: "3"),
+                .define("WITH_SHIPPED_GEOIP_H"),
+                .define("TORRENT_USE_TOMMATH"),
+                .define("BOOST_ASIO_SEPARATE_COMPILATION"),
+                .define("TORRENT_BUILDING_STATIC"),
+                .headerSearchPath("../../include/"),
             ]
         ),
-
-    ]
+    ],
+    cxxLanguageStandard: .gnucxx11
 )
