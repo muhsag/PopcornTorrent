@@ -18,6 +18,7 @@ let package = Package(
             name: "PopcornTorrent",
             dependencies: ["GCDWebServer"],
             path: "PopcornTorrent",
+            publicHeadersPath: "PopcornTorrent/Source/Client",
             cSettings: [
                 .define("SWIFT_PACKAGE"),
             ],
