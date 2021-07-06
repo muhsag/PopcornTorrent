@@ -149,15 +149,32 @@ using namespace libtorrent;
                                   progress:(PTTorrentStreamerProgress)progress
                                readyToPlay:(PTTorrentStreamerReadyToPlay)readyToPlay
                                    failure:(PTTorrentStreamerFailure)failure {
-    self.progressBlock = progress;
-    self.readyToPlayBlock = readyToPlay;
-    self.failureBlock = failure;
+    
     
     self.alertsQueue = dispatch_queue_create("com.popcorntimetv.popcorntorrent.alerts", DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL);
     self.alertsLoopActive = YES;
     dispatch_async(self.alertsQueue, ^{
         [self alertsLoop];
     });
+    
+    [self startStreamingFromFileOrMagnetLink:filePathOrMagnetLink
+                               directoryName:directoryName
+                                    progress:progress
+                                 readyToPlay:readyToPlay
+                                     failure:failure
+                                  fastResume:true];
+}
+
+- (void)startStreamingFromFileOrMagnetLink:(NSString *)filePathOrMagnetLink
+                             directoryName:(NSString * _Nullable)directoryName
+                                  progress:(PTTorrentStreamerProgress)progress
+                               readyToPlay:(PTTorrentStreamerReadyToPlay)readyToPlay
+                                   failure:(PTTorrentStreamerFailure)failure
+                                fastResume:(Boolean)fastResume {
+
+    self.progressBlock = progress;
+    self.readyToPlayBlock = readyToPlay;
+    self.failureBlock = failure;
     
     error_code ec;
     add_torrent_params tp;
@@ -203,6 +220,8 @@ using namespace libtorrent;
         return [self cancelStreamingAndDeleteData:NO];
     }
     
+    Boolean didTryFastResume = false;
+    
     _savePath = [basePath stringByAppendingPathComponent:pathComponent];
     //create folder for torrents
     if (![[NSFileManager defaultManager] fileExistsAtPath:_savePath]) {
@@ -216,7 +235,7 @@ using namespace libtorrent;
             if (failure) failure(error);
             return [self cancelStreamingAndDeleteData:NO];
         }
-    }else if([filePathOrMagnetLink hasPrefix:@"magnet"]){
+    } else if ([filePathOrMagnetLink hasPrefix:@"magnet"] && fastResume){
         //if folder exists already and we are loading a magnet search for resume file
         NSData *resumeData = [NSData dataWithContentsOfFile:[_savePath stringByAppendingString:@"/resumeData.fastresume"] ];
         if (resumeData != nil){
@@ -224,6 +243,7 @@ using namespace libtorrent;
             //read resume file
             std::vector<char> resumeVector((char *)resumeData.bytes, (char *)resumeData.bytes + len);
             tp = read_resume_data(resumeVector, ec);//load it into the torrent
+            didTryFastResume = true;
             if (ec) std::printf("  failed to load resume data: %s\n", ec.message().c_str());
         }
         ec.clear();
@@ -232,16 +252,28 @@ using namespace libtorrent;
     tp.save_path = std::string([self.savePath UTF8String]);
     tp.storage_mode = storage_mode_allocate;
     
-    torrent_handle th = _session->add_torrent(tp, ec);
+    error_code ec_1;
+    torrent_handle th = _session->add_torrent(tp, ec_1);
+    if (ec_1) {
+        if (didTryFastResume) {
+            // retry streaming without fast resume
+            [self cancelStreamingAndDeleteData:NO];
+            [self startStreamingFromFileOrMagnetLink:filePathOrMagnetLink
+                                       directoryName:directoryName
+                                            progress:progress
+                                         readyToPlay:readyToPlay
+                                             failure:failure
+                                          fastResume:false];
+        } else {
+            NSError *error = [[NSError alloc] initWithDomain:@"com.popcorntimetv.popcorntorrent.error" code:-1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithCString:ec_1.message().c_str() encoding:NSUTF8StringEncoding]}];
+            if (failure) failure(error);
+            [self cancelStreamingAndDeleteData:NO];
+        }
+        return;
+    }
     th.set_sequential_download(true);
     th.set_max_connections(60);
     th.set_max_uploads(10);
-    
-    if (ec) {
-        NSError *error = [[NSError alloc] initWithDomain:@"com.popcorntimetv.popcorntorrent.error" code:-1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithCString:ec.message().c_str() encoding:NSUTF8StringEncoding]}];
-        if (failure) failure(error);
-        return [self cancelStreamingAndDeleteData:NO];
-    }
     
     if (![filePathOrMagnetLink hasPrefix:@"magnet"]) {
         [self metadataReceivedAlert:th];
