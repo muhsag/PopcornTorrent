@@ -18,6 +18,7 @@ let package = Package(
             name: "PopcornTorrent",
             dependencies: ["GCDWebServer"],
             path: "PopcornTorrent/Source",
+            exclude: ["torrent/Makefile.am", "torrent/Makefile.in"],
             cSettings: [
                 .define("SWIFT_PACKAGE"),
             ],
