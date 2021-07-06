@@ -8,18 +8,15 @@ let package = Package(
         .iOS(.v12), .tvOS(.v12)
     ],
     products: [
-        .library(
-            name: "PopcornTorrent",
-            type: .dynamic,
-            targets: ["PopcornTorrent"]),
+        .library(name: "PopcornTorrent", targets: ["PopcornTorrent"]),
     ],
     dependencies: [
-        .package(path: "../GCDWebServer")
+        .package(url: "https://github.com/SlaunchaMan/GCDWebServer", .branch("swift-package-manager"))
     ],
     targets: [
         .target(
             name: "PopcornTorrent",
-            dependencies: [],
+            dependencies: ["GCDWebServer"],
             path: "PopcornTorrent/Source",
             cSettings: [
                 .define("SWIFT_PACKAGE"),
