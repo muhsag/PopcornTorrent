@@ -6,14 +6,16 @@
 #import <libtorrent/alert.hpp>
 #import <libtorrent/alert_types.hpp>
 #import <libtorrent/bencode.hpp>
+#ifdef SWIFT_PACKAGE
+#import "../Security/CocoaSecurity.h"
+#import "../../Supporting Files/NSString+Localization.h"
+#else
 #import "CocoaSecurity.h"
+#import "NSString+Localization.h"
+#endif
 #import "PTTorrentStreamer+Protected.h"
 #import <GCDWebServer.h>
-//#import <GCDWebServer/GCDWebServerFileRequest.h>
-//#import <GCDWebServer/GCDWebServerFileResponse.h>
-//#import <GCDWebServer/GCDWebServerPrivate.h>
 #import <UIKit/UIApplication.h>
-#import "NSString+Localization.h"
 #import "PTSize.h"
 
 #define ALERTS_LOOP_WAIT_MILLIS 500

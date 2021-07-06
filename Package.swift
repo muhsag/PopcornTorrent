@@ -17,12 +17,13 @@ let package = Package(
         .target(
             name: "PopcornTorrent",
             dependencies: ["GCDWebServer"],
-            path: "PopcornTorrent",
+            path: "PopcornTorrent/Source",
             publicHeadersPath: "PopcornTorrent/Source/Client",
             cSettings: [
                 .define("SWIFT_PACKAGE"),
             ],
             cxxSettings: [
+                .define("SWIFT_PACKAGE"),
                 .define("BOOST_ASIO_ENABLE_CANCELIO"),
                 .define("BOOST_ASIO_HASH_MAP_BUCKETS", to: "1021"),
                 .define("BOOST_FILESYSTEM_VERSION", to: "3"),
@@ -30,7 +31,7 @@ let package = Package(
                 .define("TORRENT_USE_TOMMATH"),
                 .define("BOOST_ASIO_SEPARATE_COMPILATION"),
                 .define("TORRENT_BUILDING_STATIC"),
-                .headerSearchPath("../include/"),
+                .headerSearchPath("../../include/"),
             ]
         ),
     ],
