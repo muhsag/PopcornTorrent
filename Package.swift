@@ -17,7 +17,7 @@ let package = Package(
         .target(
             name: "PopcornTorrent",
             dependencies: ["GCDWebServer"],
-            path: "PopcornTorrent/Source",
+            path: "PopcornTorrent",
             cSettings: [
                 .define("SWIFT_PACKAGE"),
             ],
@@ -29,7 +29,7 @@ let package = Package(
                 .define("TORRENT_USE_TOMMATH"),
                 .define("BOOST_ASIO_SEPARATE_COMPILATION"),
                 .define("TORRENT_BUILDING_STATIC"),
-                .headerSearchPath("../../include/"),
+                .headerSearchPath("../include/"),
             ]
         ),
     ],
