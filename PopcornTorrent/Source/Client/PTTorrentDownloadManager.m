@@ -3,7 +3,9 @@
 #import "PTTorrentDownloadManager.h"
 #import "PTTorrentDownload.h"
 #import <objc/runtime.h>
+#if TARGET_OS_IOS
 #import <UIKit/UIApplication.h>
+#endif
 #import "PTTorrentDownloadManagerListener.h"
 
 @interface PTTorrentDownloadManager () <PTTorrentDownloadManagerListener>
@@ -32,7 +34,8 @@
         _listeners = [NSHashTable weakObjectsHashTable];
         _activeDownloads = [NSMutableArray array];
         _completedDownloads = [NSMutableArray array];
-        
+      
+#if TARGET_OS_IOS
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(applicationDidEnterBackground)
                                                      name:UIApplicationDidEnterBackgroundNotification
@@ -41,6 +44,7 @@
                                                  selector:@selector(applicationWillEnterForeground)
                                                      name:UIApplicationWillEnterForegroundNotification
                                                    object:nil];
+#endif
         
         NSString *path = [PTTorrentDownload downloadDirectory];
         
@@ -77,13 +81,14 @@
 }
 
 - (void)applicationDidEnterBackground {
-    
+#if TARGET_OS_IOS
     __block UIBackgroundTaskIdentifier backgroundTaskIdentifier = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
         
         [[UIApplication sharedApplication] endBackgroundTask:backgroundTaskIdentifier];
 
         backgroundTaskIdentifier = UIBackgroundTaskInvalid;
     }];
+#endif
     
     __weak __typeof__(self) weakSelf = self;
     
@@ -98,10 +103,11 @@
         for (PTTorrentDownload *download in weakSelf.completedDownloads) {
             [download save];
         }
-        
+#if TARGET_OS_IOS
         [[UIApplication sharedApplication] endBackgroundTask:backgroundTaskIdentifier];
         
         backgroundTaskIdentifier = UIBackgroundTaskInvalid;
+#endif
     });
 }
 

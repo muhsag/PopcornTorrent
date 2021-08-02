@@ -5,7 +5,7 @@ let package = Package(
     name: "PopcornTorrent",
     defaultLocalization: "en",
     platforms: [
-        .iOS(.v12), .tvOS(.v12)
+        .iOS(.v12), .tvOS(.v12), .macOS(.v11)
     ],
     products: [
         .library(name: "PopcornTorrent", targets: ["PopcornTorrent"]),

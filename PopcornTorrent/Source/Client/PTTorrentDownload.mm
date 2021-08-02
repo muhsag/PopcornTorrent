@@ -5,7 +5,9 @@
 #import "PTTorrentStreamer+Protected.h"
 #import "PTTorrentDownloadManagerListener.h"
 #import <MediaPlayer/MPMediaItem.h>
+#if TARGET_OS_IOS || TARGET_OS_TVOS
 #import <UIKit/UIApplication.h>
+#endif
 
 NSString * const PTTorrentItemPropertyDownloadStatus = @"downloadStatus";
 NSString * const MPMediaItemPropertyPathOrLink = @"filePathOrLink";
