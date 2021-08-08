@@ -999,7 +999,7 @@
 			isa = PBXGroup;
 			children = (
 				4D1440221E9AF42300B78269 /* Base.lproj */,
-				922F43A71CA37F0200955B33 /* Source */,
+				922F43A71CA37F0200955B33 /* Sources */,
 				4DFBACF71E990548009A5E35 /* Supporting Files */,
 			);
 			path = PopcornTorrent;
@@ -1018,7 +1018,7 @@
 			path = PopcornTorrentTests;
 			sourceTree = "<group>";
 		};
-		922F43A71CA37F0200955B33 /* Source */ = {
+		922F43A71CA37F0200955B33 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
 				4D97E6E61D99A3A6009FEF7E /* boost_filesystem */,
@@ -1027,7 +1027,7 @@
 				922F43A81CA37F0200955B33 /* Client */,
 				4DF87B051EE09625006CCBB7 /* Security */,
 			);
-			path = Source;
+			path = Sources;
 			sourceTree = "<group>";
 		};
 		922F43A81CA37F0200955B33 /* Client */ = {
