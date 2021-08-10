@@ -11,7 +11,7 @@ let package = Package(
         .library(name: "PopcornTorrent", targets: ["PopcornTorrent"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/SlaunchaMan/GCDWebServer", .branch("swift-package-manager"))
+        .package(url: "https://github.com/alextud/GCDWebServer", .branch("swift-package-manager"))
     ],
     targets: [
         .target(
