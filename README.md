@@ -10,4 +10,4 @@ Torrent client for tvOS / iOS / macOS implemented with `libtorrent`.
 
 ## Compile a new version
 
-1. Open up `Package.swift` with scode and build
+1. Open `Package.swift` with Xcode and build
