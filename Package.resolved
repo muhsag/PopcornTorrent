@@ -1,0 +1,16 @@
+{
+  "object": {
+    "pins": [
+      {
+        "package": "GCDWebServer",
+        "repositoryURL": "https://github.com/alextud/GCDWebServer",
+        "state": {
+          "branch": "swift-package-manager",
+          "revision": "935e2736044e71e5341663c3cc9a335ba6867a2b",
+          "version": null
+        }
+      }
+    ]
+  },
+  "version": 1
+}

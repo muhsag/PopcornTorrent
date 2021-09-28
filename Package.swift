@@ -19,11 +19,9 @@ let package = Package(
             dependencies: ["GCDWebServer"],
             path: "PopcornTorrent/Sources",
             exclude: ["torrent/Makefile.am", "torrent/Makefile.in"],
-            cSettings: [
-                .define("SWIFT_PACKAGE"),
-            ],
             cxxSettings: [
-                .define("SWIFT_PACKAGE"),
+                .define("TARGET_OS_IOS", .when(platforms: [.iOS])),
+                .define("TARGET_OS_TVOS", .when(platforms: [.tvOS])),
                 .define("BOOST_ASIO_ENABLE_CANCELIO"),
                 .define("BOOST_ASIO_HASH_MAP_BUCKETS", to: "1021"),
                 .define("BOOST_FILESYSTEM_VERSION", to: "3"),
@@ -34,6 +32,12 @@ let package = Package(
                 .headerSearchPath("../../include/"),
             ]
         ),
+        .testTarget(name: "PopcornTorrent-Tests",
+                    dependencies: [.targetItem(name: "PopcornTorrent", condition: nil)],
+                    path: "PopcornTorrentTests",
+                    exclude: ["Test.torrent"]
+                    ,linkerSettings: [.linkedFramework("MediaPlayer"), .linkedFramework("SystemConfiguration")]
+                   )
     ],
     cLanguageStandard: .gnu99,
     cxxLanguageStandard: .gnucxx11

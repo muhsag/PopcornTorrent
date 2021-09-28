@@ -1,7 +1,7 @@
 
 
 #import <XCTest/XCTest.h>
-#import <PopcornTorrent/PopcornTorrent.h>
+#import <PopcornTorrent.h>
 
 @interface PopcornTorrentTests : XCTestCase
 @property (nonatomic,strong) PTTorrentStreamer *streamer;

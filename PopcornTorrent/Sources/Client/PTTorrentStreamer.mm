@@ -6,13 +6,8 @@
 #import <libtorrent/alert.hpp>
 #import <libtorrent/alert_types.hpp>
 #import <libtorrent/bencode.hpp>
-#ifdef SWIFT_PACKAGE
 #import "../Security/CocoaSecurity.h"
-#import "../../Supporting Files/NSString+Localization.h"
-#else
-#import "CocoaSecurity.h"
-#import "NSString+Localization.h"
-#endif
+#import "../Resources/NSString+Localization.h"
 #import "PTTorrentStreamer+Protected.h"
 #import <GCDWebServer.h>
 #if TARGET_OS_IOS || TARGET_OS_TVOS

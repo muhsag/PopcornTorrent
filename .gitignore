@@ -7,3 +7,5 @@ xcuserdata/
 DerivedData/
 *.xcworkspace
 PopcornTorrent/Build/
+.build/
+.swiftpm/
