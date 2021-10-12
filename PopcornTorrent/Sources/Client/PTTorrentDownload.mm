@@ -5,7 +5,7 @@
 #import "PTTorrentStreamer+Protected.h"
 #import "PTTorrentDownloadManagerListener.h"
 #import <MediaPlayer/MPMediaItem.h>
-#if TARGET_OS_IOS || TARGET_OS_TVOS
+#if TARGET_OS_IOS || TARGET_OS_TV
 #import <UIKit/UIApplication.h>
 #endif
 
@@ -26,7 +26,7 @@ using namespace libtorrent;
 + (NSString *)downloadDirectory {
     NSURL *URL;
     
-    #if TARGET_OS_IOS
+    #if TARGET_OS_IOS || TARGET_OS_MAC
     URL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
     #elif TARGET_OS_TV
     URL = [[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] lastObject];

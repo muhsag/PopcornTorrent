@@ -21,7 +21,8 @@ let package = Package(
             exclude: ["torrent/Makefile.am", "torrent/Makefile.in"],
             cxxSettings: [
                 .define("TARGET_OS_IOS", .when(platforms: [.iOS])),
-                .define("TARGET_OS_TVOS", .when(platforms: [.tvOS])),
+                .define("TARGET_OS_TV", .when(platforms: [.tvOS])),
+                .define("TARGET_OS_MAC", .when(platforms: [.macOS])),
                 .define("BOOST_ASIO_ENABLE_CANCELIO"),
                 .define("BOOST_ASIO_HASH_MAP_BUCKETS", to: "1021"),
                 .define("BOOST_FILESYSTEM_VERSION", to: "3"),
