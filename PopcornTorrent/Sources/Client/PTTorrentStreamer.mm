@@ -254,13 +254,12 @@ using namespace libtorrent;
     if (ec_1) {
         if (didTryFastResume) {
             // retry streaming without fast resume
-            [self cancelStreamingAndDeleteData:NO];
+            [self cancelStreamingAndDeleteData:YES];
             [self startStreamingFromFileOrMagnetLink:filePathOrMagnetLink
                                        directoryName:directoryName
                                             progress:progress
                                          readyToPlay:readyToPlay
-                                             failure:failure
-                                          fastResume:false];
+                                             failure:failure];
         } else {
             NSError *error = [[NSError alloc] initWithDomain:@"com.popcorntimetv.popcorntorrent.error" code:-1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithCString:ec_1.message().c_str() encoding:NSUTF8StringEncoding]}];
             if (failure) failure(error);
