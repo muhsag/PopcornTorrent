@@ -47,6 +47,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <set>
 #include <atomic>
 
+#if TORRENT_ABI_VERSION == 1 && defined TORRENT_WINDOWS
+#include "libtorrent/aux_/escape_string.hpp"
+#endif
+
 #if defined(TORRENT_WINDOWS) || defined(TORRENT_OS2)
 #define TORRENT_SEPARATOR '\\'
 #else
@@ -84,6 +88,7 @@ namespace libtorrent {
 	file_storage::file_storage(file_storage const&) = default;
 	file_storage& file_storage::operator=(file_storage const&) = default;
 	file_storage::file_storage(file_storage&&) noexcept = default;
+	file_storage& file_storage::operator=(file_storage&&) = default;
 
 	void file_storage::reserve(int num_files)
 	{
@@ -362,27 +367,29 @@ namespace {
 			, fe.symlink_path);
 	}
 
+#if defined TORRENT_WINDOWS
 	void file_storage::set_name(std::wstring const& n)
 	{
-		m_name = wchar_utf8(n);
+		m_name = convert_from_wstring(n);
 	}
 
 	void file_storage::rename_file_deprecated(file_index_t index, std::wstring const& new_filename)
 	{
 		TORRENT_ASSERT_PRECOND(index >= file_index_t(0) && index < end_file());
-		update_path_index(m_files[index], wchar_utf8(new_filename));
+		update_path_index(m_files[index], convert_from_wstring(new_filename));
 	}
 
 	void file_storage::add_file(std::wstring const& file, std::int64_t file_size
 		, file_flags_t const file_flags, std::time_t mtime, string_view symlink_path)
 	{
-		add_file(wchar_utf8(file), file_size, file_flags, mtime, symlink_path);
+		add_file(convert_from_wstring(file), file_size, file_flags, mtime, symlink_path);
 	}
 
 	void file_storage::rename_file(file_index_t index, std::wstring const& new_filename)
 	{
 		rename_file_deprecated(index, new_filename);
 	}
+#endif // TORRENT_WINDOWS
 #endif // TORRENT_ABI_VERSION
 
 	void file_storage::rename_file(file_index_t const index
@@ -658,19 +665,36 @@ namespace {
 	{
 		TORRENT_ASSERT_PRECOND(index >= file_index_t(0) && index < end_file());
 		internal_file_entry const& fe = m_files[index];
-		TORRENT_ASSERT(fe.symlink_index < int(m_symlinks.size()));
-
-		auto const& link = m_symlinks[fe.symlink_index];
-
 		// TODO: 3 this is a hack to retain ABI compatibility with 1.2.1
 		// in next major release, make this return by value
 		static std::string storage[4];
 		static std::atomic<size_t> counter{0};
+
+		if (fe.symlink_index == internal_file_entry::not_a_symlink)
+		{
+			std::string& ret = storage[(counter++) % 4];
+			ret.clear();
+			return ret;
+		}
+
+		TORRENT_ASSERT(fe.symlink_index < int(m_symlinks.size()));
+
+		auto const& link = m_symlinks[fe.symlink_index];
+
 		std::string& ret = storage[(counter++) % 4];
 		ret.reserve(m_name.size() + link.size() + 1);
 		ret.assign(m_name);
 		append_path(ret, link);
 		return ret;
+	}
+
+	std::string const& file_storage::internal_symlink(file_index_t const index) const
+	{
+		TORRENT_ASSERT_PRECOND(index >= file_index_t{} && index < end_file());
+		internal_file_entry const& fe = m_files[index];
+		TORRENT_ASSERT(fe.symlink_index < int(m_symlinks.size()));
+
+		return m_symlinks[fe.symlink_index];
 	}
 
 	std::time_t file_storage::mtime(file_index_t const index) const

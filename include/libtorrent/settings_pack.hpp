@@ -54,6 +54,8 @@ POSSIBILITY OF SUCH DAMAGE.
 // that will be sent to the tracker. The user-agent will also be used to identify the
 // client with other peers.
 //
+// Each configuration option is named with an enum value inside the
+// settings_pack class. These are the available settings:
 namespace libtorrent {
 
 namespace aux {
@@ -73,6 +75,7 @@ namespace aux {
 		, aux::session_settings_single_thread& sett
 		, std::vector<void(aux::session_impl::*)()>* callbacks = nullptr);
 	TORRENT_EXTRA_EXPORT void run_all_updates(aux::session_impl& ses);
+	TORRENT_EXTRA_EXPORT int default_int_value(int const name);
 
 	// converts a setting integer (from the enums string_types, int_types or
 	// bool_types) to a string, and vice versa.
@@ -86,8 +89,6 @@ namespace aux {
 	// enum values. These values are passed in to the ``set_str()``,
 	// ``set_int()``, ``set_bool()`` functions, to specify the setting to
 	// change.
-	//
-	// These are the available settings:
 	//
 	// .. include:: settings-ref.rst
 	//
@@ -144,8 +145,7 @@ namespace aux {
 			index_mask =       0x3fff
 		};
 
-		// enumeration values naming string settings in the pack. To be used with
-		// get_str() and set_str().
+		// hidden
 		enum string_types
 		{
 			// this is the client identification to the tracker. The recommended
@@ -158,6 +158,12 @@ namespace aux {
 			// ``announce_ip`` is the ip address passed along to trackers as the
 			// ``&ip=`` parameter. If left as the default, that parameter is
 			// omitted.
+			//
+			// .. note::
+			//    This setting is only meant for very special cases where a seed is
+			//    running on the same host as the tracker, and the tracker accepts
+			//    the IP parameter (which normal trackers don't). Do not set this
+			//    option unless you also control the tracker.
 			announce_ip,
 
 #if TORRENT_ABI_VERSION == 1
@@ -184,34 +190,80 @@ namespace aux {
 
 			// this is the client name and version identifier sent to peers in the
 			// handshake message. If this is an empty string, the user_agent is
-			// used instead
+			// used instead. This string must be a UTF-8 encoded unicode string.
 			handshake_client_version,
 
-			// sets the network interface this session will use when it opens
-			// outgoing connections. An empty string binds outgoing connections to
-			// INADDR_ANY and port 0 (i.e. let the OS decide). The parameter must
-			// be a string containing one or more, comma separated, adapter names.
-			// Adapter names on Unix systems are of the form "eth0", "eth1",
-			// "tun0", etc. When specifying multiple interfaces, they will be
-			// assigned in round-robin order. This may be useful for clients that
-			// are multi-homed. Binding an outgoing connection to a local IP does
-			// not necessarily make the connection via the associated NIC/Adapter.
-			// Setting this to an empty string will disable binding of outgoing
-			// connections.
+			// This controls which IP address outgoing TCP peer connections are bound
+			// to, in addition to controlling whether such connections are also
+			// bound to a specific network interface/adapter (*bind-to-device*).
+			//
+			// This string is a comma-separated list of IP addresses and
+			// interface names. An empty string will not bind TCP sockets to a
+			// device, and let the network stack assign the local address.
+			//
+			// A list of names will be used to bind outgoing TCP sockets in a
+			// round-robin fashion. An IP address will simply be used to `bind()`
+			// the socket. An interface name will attempt to bind the socket to
+			// that interface. If that fails, or is unsupported, one of the IP
+			// addresses configured for that interface is used to `bind()` the
+			// socket to. If the interface or adapter doesn't exist, the
+			// outgoing peer connection will fail with an error message suggesting
+			// the device cannot be found. Adapter names on Unix systems are of
+			// the form "eth0", "eth1", "tun0", etc. This may be useful for
+			// clients that are multi-homed. Binding an outgoing connection to a
+			// local IP does not necessarily make the connection via the
+			// associated NIC/Adapter.
+			//
+			// When outgoing interfaces are specified, incoming connections or
+			// packets sent to a local interface or IP that's *not* in this list
+			// will be rejected with a peer_blocked_alert with
+			// ``invalid_local_interface`` as the reason.
+			//
+			// Note that these are just interface/adapter names or IP addresses.
+			// There are no ports specified in this list. IPv6 addresses without
+			// port should be specified without enclosing ``[``, ``]``.
 			outgoing_interfaces,
 
 			// a comma-separated list of (IP or device name, port) pairs. These are
 			// the listen ports that will be opened for accepting incoming uTP and
-			// TCP connections. It is possible to listen on multiple interfaces and
+			// TCP peer connections. These are also used for *outgoing* uTP and UDP
+			// tracker connections and DHT nodes.
+			//
+			// It is possible to listen on multiple interfaces and
 			// multiple ports. Binding to port 0 will make the operating system
 			// pick the port.
 			//
-			// a port that has an "s" suffix will accept SSL connections. (note
-			// that SSL sockets are not enabled by default).
+			// .. note::
+			//    There are reasons to stick to the same port across sessions,
+			//    which would mean only using port 0 on the first start, and
+			//    recording the port that was picked for subsequent startups.
+			//    Trackers, the DHT and other peers will remember the port they see
+			//    you use and hand that port out to other peers trying to connect
+			//    to you, as well as trying to connect to you themselves.
 			//
-			// if binding fails, the listen_failed_alert is posted. If or once a
-			// socket binding succeeds, the listen_succeeded_alert is posted. There
-			// may be multiple failures before a success.
+			// A port that has an "s" suffix will accept SSL peer connections. (note
+			// that SSL sockets are only available in builds with SSL support)
+			//
+			// A port that has an "l" suffix will be considered a local network.
+			// i.e. it's assumed to only be able to reach hosts in the same local
+			// network as the IP address (based on the netmask associated with the
+			// IP, queried from the operating system).
+			//
+			// if binding fails, the listen_failed_alert is posted. Once a
+			// socket binding succeeds (if it does), the listen_succeeded_alert
+			// is posted. There may be multiple failures before a success.
+			//
+			// If a device name that does not exist is configured, no listen
+			// socket will be opened for that interface. If this is the only
+			// interface configured, it will be as if no listen ports are
+			// configured.
+			//
+			// If no listen ports are configured (e.g. listen_interfaces is an
+			// empty string), networking will be disabled. No DHT will start, no
+			// outgoing uTP or tracker connections will be made. No incoming TCP
+			// or uTP connections will be accepted. (outgoing TCP connections
+			// will still be possible, depending on
+			// settings_pack::outgoing_interfaces).
 			//
 			// For example:
 			// ``[::1]:8888`` - will only accept connections on the IPv6 loopback
@@ -223,17 +275,34 @@ namespace aux {
 			// ``[::]:0s`` - will accept SSL connections on a port chosen by the
 			// OS. And not accept non-SSL connections at all.
 			//
-			// ``0.0.0.0:6881,[::]:6881`` - binds to all interfaces on port 6881
+			// ``0.0.0.0:6881,[::]:6881`` - binds to all interfaces on port 6881.
 			//
-			// Windows OS network adapter device name can be specified with GUID.
+			// ``10.0.1.13:6881l`` - binds to the local IP address, port 6881, but
+			// only allow talking to peers on the same local network. The netmask
+			// is queried from the operating system. Interfaces marked ``l`` are
+			// not announced to trackers, unless the tracker is also on the same
+			// local network.
+			//
+			// Windows OS network adapter device name must be specified with GUID.
 			// It can be obtained from "netsh lan show interfaces" command output.
 			// GUID must be uppercased string embraced in curly brackets.
-			// ``{E4F0B674-0DFC-48BB-98A5-2AA730BDB6D6}::7777`` - will accept
+			// ``{E4F0B674-0DFC-48BB-98A5-2AA730BDB6D6}:7777`` - will accept
 			// connections on port 7777 on adapter with this GUID.
+			//
+			// For more information, see the `Multi-homed hosts`_ section.
+			//
+			// .. _`Multi-homed hosts`: manual-ref.html#multi-homed-hosts
 			listen_interfaces,
 
 			// when using a proxy, this is the hostname where the proxy is running
-			// see proxy_type.
+			// see proxy_type. Note that when using a proxy, the
+			// settings_pack::listen_interfaces setting is overridden and only a
+			// single interface is created, just to contact the proxy. This
+			// means a proxy cannot be combined with SSL torrents or multiple
+			// listen interfaces. This proxy listen interface will not accept
+			// incoming TCP connections, will not map ports with any gateway and
+			// will not enable local service discovery. All traffic is supposed
+			// to be channeled through the proxy.
 			proxy_hostname,
 
 			// when using a proxy, these are the credentials (if any) to use when
@@ -266,16 +335,16 @@ namespace aux {
 			max_string_setting_internal
 		};
 
-		// enumeration values naming boolean settings in the pack. To be used with
-		// get_bool() and set_bool().
+		// hidden
 		enum bool_types
 		{
 			// determines if connections from the same IP address as existing
 			// connections should be rejected or not. Rejecting multiple connections
 			// from the same IP address will prevent abusive
-			// behavior by peers. It may be useful to allow such connections in
-			// cases where simulations are run on the same machine, and all peers
-			// in a swarm has the same IP address.
+			// behavior by peers. The logic for determining whether connections are
+			// to the same peer is more complicated with this enabled, and more
+			// likely to fail in some edge cases. It is not recommended to enable
+			// this feature.
 			allow_multiple_connections_per_ip = bool_type_base,
 
 #if TORRENT_ABI_VERSION == 1
@@ -311,7 +380,7 @@ namespace aux {
 
 			// ``upnp_ignore_nonrouters`` indicates whether or not the UPnP
 			// implementation should ignore any broadcast response from a device
-			// whose address is not the configured router for this machine. i.e.
+			// whose address is not on our subnet. i.e.
 			// it's a way to not talk to other people's routers by mistake.
 			upnp_ignore_nonrouters,
 
@@ -393,10 +462,14 @@ namespace aux {
 			// preference of one protocol over another.
 			prefer_udp_trackers,
 
+#if TORRENT_ABI_VERSION == 1
 			// ``strict_super_seeding`` when this is set to true, a piece has to
 			// have been forwarded to a third peer before another one is handed
 			// out. This is the traditional definition of super seeding.
-			strict_super_seeding,
+			strict_super_seeding TORRENT_DEPRECATED_ENUM,
+#else
+			deprecated_strict_super_seeding,
+#endif
 
 #if TORRENT_ABI_VERSION == 1
 			// if this is set to true, the memory allocated for the disk cache
@@ -486,17 +559,25 @@ namespace aux {
 			// requested from another peer already.
 			strict_end_game_mode,
 
+#if TORRENT_ABI_VERSION == 1
 			// if ``broadcast_lsd`` is set to true, the local peer discovery (or
 			// Local Service Discovery) will not only use IP multicast, but also
 			// broadcast its messages. This can be useful when running on networks
 			// that don't support multicast. Since broadcast messages might be
 			// expensive and disruptive on networks, only every 8th announce uses
 			// broadcast.
-			broadcast_lsd,
+			broadcast_lsd TORRENT_DEPRECATED_ENUM,
+#else
+			deprecated_broadcast_lsd,
+#endif
 
-			// when set to true, libtorrent will try to make outgoing utp
-			// connections controls whether libtorrent will accept incoming
-			// connections or make outgoing connections of specific type.
+			// Enables incoming and outgoing, TCP and uTP peer connections.
+			// ``false`` is disabled and ``true`` is enabled. When outgoing
+			// connections are disabled, libtorrent will simply not make
+			// outgoing peer connections with the specific transport protocol.
+			// Disabled incoming peer connections will simply be rejected.
+			// These options only apply to peer connections, not tracker- or any
+			// other kinds of connections.
 			enable_outgoing_utp,
 			enable_incoming_utp,
 			enable_outgoing_tcp,
@@ -753,9 +834,8 @@ namespace aux {
 			// changes are taken in consideration.
 			enable_ip_notifier,
 
-			// when this is true, nodes whose IDs are derived from their source IP
-			// according to BEP 42 (http://bittorrent.org/beps/bep_0042.html) are
-			// preferred in the routing table.
+			// when this is true, nodes whose IDs are derived from their source
+			// IP according to `BEP 42`_ are preferred in the routing table.
 			dht_prefer_verified_node_ids,
 
 			// when this is true, create an affinity for downloading 4 MiB extents
@@ -764,11 +844,38 @@ namespace aux {
 			// small piece sizes
 			piece_extent_affinity,
 
+			// when set to true, the certificate of HTTPS trackers and HTTPS web
+			// seeds will be validated against the system's certificate store
+			// (as defined by OpenSSL). If the system does not have a
+			// certificate store, this option may have to be disabled in order
+			// to get trackers and web seeds to work).
+			validate_https_trackers,
+
+			// when enabled, tracker and web seed requests are subject to
+			// certain restrictions.
+			//
+			// An HTTP(s) tracker requests to localhost (loopback)
+			// must have the request path start with "/announce". This is the
+			// conventional bittorrent tracker request. Any other HTTP(S)
+			// tracker request to loopback will be rejected. This applies to
+			// trackers that redirect to loopback as well.
+			//
+			// Web seeds that end up on the client's local network (i.e. in a
+			// private IP address range) may not include query string arguments.
+			// This applies to web seeds redirecting to the local network as
+			// well.
+			ssrf_mitigation,
+
+			// when disabled, any tracker or web seed with an IDNA hostname
+			// (internationalized domain name) is ignored. This is a security
+			// precaution to avoid various unicode encoding attacks that might
+			// happen at the application level.
+			allow_idna,
+
 			max_bool_setting_internal
 		};
 
-		// enumeration values naming integer settings in the pack. To be used with
-		// get_int() and set_int().
+		// hidden
 		enum int_types
 		{
 			// ``tracker_completion_timeout`` is the number of seconds the tracker
@@ -853,7 +960,7 @@ namespace aux {
 
 			// number of seconds until a new retry of a url-seed takes place.
 			// Default retry value for http-seeds that don't provide
-                        // a valid ``retry-after`` header.
+			// a valid ``retry-after`` header.
 			urlseed_wait_retry,
 
 			// sets the upper limit on the total number of files this session will
@@ -865,12 +972,12 @@ namespace aux {
 			// of file descriptors a process may have open.
 			file_pool_size,
 
-                        // ``max_failcount`` is the maximum times we try to
-                        // connect to a peer before stop connecting again. If a
-                        // peer succeeds, the failure counter is reset. If a
-                        // peer is retrieved from a peer source (other than DHT)
-                        // the failcount is decremented by one, allowing another
-                        // try.
+			// ``max_failcount`` is the maximum times we try to
+			// connect to a peer before stop connecting again. If a
+			// peer succeeds, the failure counter is reset. If a
+			// peer is retrieved from a peer source (other than DHT)
+			// the failcount is decremented by one, allowing another
+			// try.
 			max_failcount,
 
 			// the number of seconds to wait to reconnect to a peer. this time is
@@ -969,45 +1076,18 @@ namespace aux {
 			send_buffer_watermark_factor,
 
 			// ``choking_algorithm`` specifies which algorithm to use to determine
-			// which peers to unchoke.
+			// how many peers to unchoke. The unchoking algorithm for
+			// downloading torrents is always "tit-for-tat", i.e. the peers we
+			// download the fastest from are unchoked.
 			//
-			// The options for choking algorithms are:
-			//
-			// * ``fixed_slots_choker`` is the traditional choker with a fixed
-			//   number of unchoke slots (as specified by
-			//   ``settings_pack::unchoke_slots_limit``).
-			//
-			// * ``rate_based_choker`` opens up unchoke slots based on the upload
-			//   rate achieved to peers. The more slots that are opened, the
-			//   marginal upload rate required to open up another slot increases.
-			//
-			// * ``bittyrant_choker`` attempts to optimize download rate by
-			//   finding the reciprocation rate of each peer individually and
-			//   prefers peers that gives the highest *return on investment*. It
-			//   still allocates all upload capacity, but shuffles it around to
-			//   the best peers first. For this choker to be efficient, you need
-			//   to set a global upload rate limit
-			//   (``settings_pack::upload_rate_limit``). For more information
-			//   about this choker, see the paper_. This choker is not fully
-			//   implemented nor tested.
-			//
-			// .. _paper: http://bittyrant.cs.washington.edu/#papers
+			// The options for choking algorithms are defined in the
+			// choking_algorithm_t enum.
 			//
 			// ``seed_choking_algorithm`` controls the seeding unchoke behavior.
-			// The available options are:
-			//
-			// * ``round_robin`` which round-robins the peers that are unchoked
-			//   when seeding. This distributes the upload bandwidth uniformly and
-			//   fairly. It minimizes the ability for a peer to download everything
-			//   without redistributing it.
-			//
-			// * ``fastest_upload`` unchokes the peers we can send to the fastest.
-			//   This might be a bit more reliable in utilizing all available
-			//   capacity.
-			//
-			// * ``anti_leech`` prioritizes peers who have just started or are
-			//   just about to finish the download. The intention is to force
-			//   peers in the middle of the download to trade with each other.
+			// i.e. How we select which peers to unchoke for seeding torrents.
+			// Since a seeding torrent isn't downloading anything, the
+			// tit-for-tat mechanism cannot be used. The available options are
+			// defined in the seed_choking_algorithm_t enum.
 			choking_algorithm,
 			seed_choking_algorithm,
 
@@ -1285,6 +1365,7 @@ namespace aux {
 			// allowed upload slots as optimistic unchoke slots.
 			num_optimistic_unchoke_slots,
 
+#if TORRENT_ABI_VERSION == 1
 			// ``default_est_reciprocation_rate`` is the assumed reciprocation
 			// rate from peers when using the BitTyrant choker. If set too high,
 			// you will over-estimate your peers and be
@@ -1301,9 +1382,14 @@ namespace aux {
 			// estimated reciprocation rate should be decreased by each unchoke
 			// interval a peer unchokes us. This only applies
 			// to the BitTyrant choker.
-			default_est_reciprocation_rate,
-			increase_est_reciprocation_rate,
-			decrease_est_reciprocation_rate,
+			default_est_reciprocation_rate TORRENT_DEPRECATED_ENUM,
+			increase_est_reciprocation_rate TORRENT_DEPRECATED_ENUM,
+			decrease_est_reciprocation_rate TORRENT_DEPRECATED_ENUM,
+#else
+			deprecated_default_est_reciprocation_rate,
+			deprecated_increase_est_reciprocation_rate,
+			deprecated_decrease_est_reciprocation_rate,
+#endif
 
 			// the max number of peers we accept from pex messages from a single
 			// peer. this limits the number of concurrent peers any of our peers
@@ -1349,15 +1435,11 @@ namespace aux {
 			deprecated_local_download_rate_limit,
 #endif
 
-#if TORRENT_ABI_VERSION == 1
 			// ``dht_upload_rate_limit`` sets the rate limit on the DHT. This is
 			// specified in bytes per second. For busy boxes
 			// with lots of torrents that requires more DHT traffic, this should
 			// be raised.
-			dht_upload_rate_limit TORRENT_DEPRECATED_ENUM,
-#else
-			deprecated_dht_upload_rate_limit,
-#endif
+			dht_upload_rate_limit,
 
 			// ``unchoke_slots_limit`` is the max number of unchoked peers in the
 			// session. The number of unchoke slots may be ignored depending on
@@ -1600,7 +1682,7 @@ namespace aux {
 			// retry a failed port bind
 			max_retry_port_bind,
 
-			// a bitmask combining flags from alert::category_t defining which
+			// a bitmask combining flags from alert_category_t defining which
 			// kinds of alerts to receive
 			alert_mask,
 
@@ -1698,29 +1780,83 @@ namespace aux {
 			// as zero.
 			resolver_cache_timeout,
 
+			// specify the not-sent low watermark for socket send buffers. This
+			// corresponds to the, Linux-specific, ``TCP_NOTSENT_LOWAT`` TCP socket
+			// option.
+			send_not_sent_low_watermark,
+
+			// the rate based choker compares the upload rate to peers against a
+			// threshold that increases proportionally by its size for every
+			// peer it visits, visiting peers in decreasing upload rate. The
+			// number of upload slots is determined by the number of peers whose
+			// upload rate exceeds the threshold. This option sets the start
+			// value for this threshold. A higher value leads to fewer unchoke
+			// slots, a lower value leads to more.
+			rate_choker_initial_threshold,
+
+			// The expiration time of UPnP port-mappings, specified in seconds. 0
+			// means permanent lease. Some routers do not support expiration times
+			// on port-maps (nor correctly returning an error indicating lack of
+			// support). In those cases, set this to 0. Otherwise, don't set it any
+			// lower than 5 minutes.
+			upnp_lease_duration,
+
+			// limits the number of concurrent HTTP tracker announces. Once the
+			// limit is hit, tracker requests are queued and issued when an
+			// outstanding announce completes.
+			max_concurrent_http_announces,
+
 			max_int_setting_internal
 		};
 
-		enum settings_counts_t : std::uint8_t
+		// hidden
+		enum settings_counts_t : int
 		{
-			num_string_settings = max_string_setting_internal - string_type_base,
-			num_bool_settings = max_bool_setting_internal - bool_type_base,
-			num_int_settings = max_int_setting_internal - int_type_base
+			num_string_settings = int(max_string_setting_internal) - int(string_type_base),
+			num_bool_settings = int(max_bool_setting_internal) - int(bool_type_base),
+			num_int_settings = int(max_int_setting_internal) - int(int_type_base)
 		};
 
 		enum suggest_mode_t : std::uint8_t { no_piece_suggestions = 0, suggest_read_cache = 1 };
 
 		enum choking_algorithm_t : std::uint8_t
 		{
+			// This is the traditional choker with a fixed number of unchoke
+			// slots (as specified by settings_pack::unchoke_slots_limit).
 			fixed_slots_choker = 0,
+
+			// This opens up unchoke slots based on the upload rate achieved to
+			// peers. The more slots that are opened, the marginal upload rate
+			// required to open up another slot increases. Configure the initial
+			// threshold with settings_pack::rate_choker_initial_threshold.
+			//
+			// For more information, see `rate based choking`_.
 			rate_based_choker = 2,
-			bittyrant_choker = 3
+#if TORRENT_ABI_VERSION == 1
+			bittyrant_choker TORRENT_DEPRECATED_ENUM = 3
+#else
+			deprecated_bittyrant_choker = 3
+#endif
 		};
 
 		enum seed_choking_algorithm_t : std::uint8_t
 		{
+			// which round-robins the peers that are unchoked
+			// when seeding. This distributes the upload bandwidth uniformly and
+			// fairly. It minimizes the ability for a peer to download everything
+			// without redistributing it.
 			round_robin,
+
+			// unchokes the peers we can send to the fastest. This might be a
+			// bit more reliable in utilizing all available capacity.
 			fastest_upload,
+
+			// prioritizes peers who have just started or are
+			// just about to finish the download. The intention is to force
+			// peers in the middle of the download to trade with each other.
+			// This does not just take into account the pieces a peer is
+			// reporting having downloaded, but also the pieces we have sent
+			// to it.
 			anti_leech
 		};
 

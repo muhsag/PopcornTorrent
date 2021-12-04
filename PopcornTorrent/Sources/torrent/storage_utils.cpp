@@ -461,6 +461,32 @@ namespace libtorrent { namespace aux {
 		}
 	}
 
+namespace {
+
+std::int64_t get_filesize(stat_cache& stat, file_index_t const file_index
+	, file_storage const& fs, std::string const& save_path, storage_error& ec)
+{
+	error_code error;
+	std::int64_t const size = stat.get_filesize(file_index, fs, save_path, error);
+
+	if (size >= 0) return size;
+	if (error != boost::system::errc::no_such_file_or_directory)
+	{
+		ec.ec = error;
+		ec.file(file_index);
+		ec.operation = operation_t::file_stat;
+	}
+	else
+	{
+		ec.ec = errors::mismatching_file_size;
+		ec.file(file_index);
+		ec.operation = operation_t::file_stat;
+	}
+	return -1;
+}
+
+}
+
 	bool verify_resume_data(add_torrent_params const& rd
 		, aux::vector<std::string, file_index_t> const& links
 		, file_storage const& fs
@@ -472,7 +498,7 @@ namespace libtorrent { namespace aux {
 #ifdef TORRENT_DISABLE_MUTABLE_TORRENTS
 		TORRENT_UNUSED(links);
 #else
-		// TODO: this should probably be moved to default_storage::initialize
+		bool added_files = false;
 		if (!links.empty())
 		{
 			TORRENT_ASSERT(int(links.size()) == fs.num_files());
@@ -491,28 +517,85 @@ namespace libtorrent { namespace aux {
 				error_code err;
 				std::string file_path = fs.file_path(idx, save_path);
 				hard_link(s, file_path, err);
+				if (err == boost::system::errc::no_such_file_or_directory)
+				{
+					// we create directories lazily, so it's possible it hasn't
+					// been created yet. Create the directories now and try
+					// again
+					create_directories(parent_path(file_path), err);
+
+					if (err)
+					{
+						ec.file(idx);
+						ec.operation = operation_t::mkdir;
+						return false;
+					}
+
+					hard_link(s, file_path, err);
+				}
 
 				// if the file already exists, that's not an error
+				if (err == boost::system::errc::file_exists)
+					continue;
+
 				// TODO: 2 is this risky? The upper layer will assume we have the
 				// whole file. Perhaps we should verify that at least the size
 				// of the file is correct
-				if (!err || err == boost::system::errc::file_exists)
-					continue;
-
-				ec.ec = err;
-				ec.file(idx);
-				ec.operation = operation_t::file_hard_link;
-				return false;
+				if (err)
+				{
+					ec.ec = err;
+					ec.file(idx);
+					ec.operation = operation_t::file_hard_link;
+					return false;
+				}
+				added_files = true;
+				stat.set_dirty(idx);
 			}
 		}
 #endif // TORRENT_DISABLE_MUTABLE_TORRENTS
 
-		bool const seed = rd.have_pieces.all_set()
-			&& rd.have_pieces.size() >= fs.num_pieces();
+		bool const seed = (rd.have_pieces.size() >= fs.num_pieces()
+			&& rd.have_pieces.all_set())
+			|| (rd.flags & torrent_flags::seed_mode);
+
+		if (seed)
+		{
+			for (file_index_t const file_index : fs.file_range())
+			{
+				if (fs.pad_file_at(file_index)) continue;
+
+				// files with priority zero may not have been saved to disk at their
+				// expected location, but is likely to be in a partfile. Just exempt it
+				// from checking
+				if (file_index < file_priority.end_index()
+					&& file_priority[file_index] == dont_download
+					&& !(rd.flags & torrent_flags::seed_mode))
+					continue;
+
+				std::int64_t const size = get_filesize(stat, file_index, fs
+					, save_path, ec);
+				if (size < 0) return false;
+
+				if (size < fs.file_size(file_index))
+				{
+					ec.ec = errors::mismatching_file_size;
+					ec.file(file_index);
+					ec.operation = operation_t::check_resume;
+					return false;
+				}
+			}
+			return true;
+		}
+
+#ifndef TORRENT_DISABLE_MUTABLE_TORRENTS
+		// always trigger a full recheck when we pull in files from other
+		// torrents, via hard links
+		if (added_files) return false;
+#endif
 
 		// parse have bitmask. Verify that the files we expect to have
 		// actually do exist
-		for (piece_index_t i(0); i < piece_index_t(rd.have_pieces.size()); ++i)
+		for (piece_index_t i(0); i < rd.have_pieces.end_index(); ++i)
 		{
 			if (rd.have_pieces.get_bit(i) == false) continue;
 
@@ -528,37 +611,10 @@ namespace libtorrent { namespace aux {
 				&& file_priority[file_index] == dont_download)
 				continue;
 
-			error_code error;
-			std::int64_t const size = stat.get_filesize(f[0].file_index
-				, fs, save_path, error);
+			if (fs.pad_file_at(file_index)) continue;
 
-			if (size < 0)
-			{
-				if (error != boost::system::errc::no_such_file_or_directory)
-				{
-					ec.ec = error;
-					ec.file(file_index);
-					ec.operation = operation_t::file_stat;
-					return false;
-				}
-				else
-				{
-					ec.ec = errors::mismatching_file_size;
-					ec.file(file_index);
-					ec.operation = operation_t::file_stat;
-					return false;
-				}
-			}
-
-			if (seed && size != fs.file_size(file_index))
-			{
-				// the resume data indicates we're a seed, but this file has
-				// the wrong size. Reject the resume data
-				ec.ec = errors::mismatching_file_size;
-				ec.file(file_index);
-				ec.operation = operation_t::check_resume;
+			if (get_filesize(stat, file_index, fs, save_path, ec) < 0)
 				return false;
-			}
 
 			// OK, this file existed, good. Now, skip all remaining pieces in
 			// this file. We're just sanity-checking whether the files exist

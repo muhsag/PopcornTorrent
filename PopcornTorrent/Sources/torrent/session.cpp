@@ -138,10 +138,6 @@ namespace {
 		// socket until the disk write is complete
 		set.set_int(settings_pack::max_queued_disk_bytes, 1);
 
-		// don't keep track of all upnp devices, keep
-		// the device list small
-		set.set_bool(settings_pack::upnp_ignore_nonrouters, true);
-
 		// never keep more than one 16kB block in
 		// the send buffer
 		set.set_int(settings_pack::send_buffer_watermark, 9);
@@ -240,8 +236,7 @@ namespace {
 
 		set.set_int(settings_pack::max_rejects, 10);
 
-		set.set_int(settings_pack::recv_socket_buffer_size, 1024 * 1024);
-		set.set_int(settings_pack::send_socket_buffer_size, 1024 * 1024);
+		set.set_int(settings_pack::send_not_sent_low_watermark, 524288);
 
 		// don't let connections linger for too long
 		set.set_int(settings_pack::request_timeout, 10);
@@ -319,7 +314,14 @@ namespace {
 		return params;
 	}
 
+	// This is here for backwards compatibility
 	void session::start(session_params&& params, io_service* ios)
+	{
+		start({}, std::move(params), ios);
+	}
+
+	void session::start(session_flags_t const flags, session_params&& params
+		, io_service* ios)
 	{
 		bool const internal_executor = ios == nullptr;
 
@@ -330,7 +332,7 @@ namespace {
 			ios = m_io_service.get();
 		}
 
-		m_impl = std::make_shared<aux::session_impl>(std::ref(*ios), std::ref(params.settings));
+		m_impl = std::make_shared<aux::session_impl>(std::ref(*ios), std::ref(params.settings), flags);
 		*static_cast<session_handle*>(this) = session_handle(m_impl);
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
@@ -341,6 +343,9 @@ namespace {
 #endif
 
 #ifndef TORRENT_DISABLE_DHT
+		if (params.settings.has_val(settings_pack::dht_upload_rate_limit))
+			params.dht_settings.upload_rate_limit = params.settings.get_int(settings_pack::dht_upload_rate_limit);
+
 		m_impl->set_dht_settings(std::move(params.dht_settings));
 		m_impl->set_dht_state(std::move(params.dht_state));
 
@@ -353,8 +358,9 @@ namespace {
 		if (internal_executor)
 		{
 			// start a thread for the message pump
+			auto s = m_io_service;
 			m_thread = std::make_shared<std::thread>(
-				[&] { m_io_service->run(); });
+				[=] { s->run(); });
 		}
 	}
 
@@ -380,14 +386,15 @@ namespace {
 
 	void session::start(session_flags_t const flags, settings_pack&& sp, io_service* ios)
 	{
-		start({std::move(sp),
+		start(flags, {std::move(sp),
 			default_plugins(!(flags & add_default_plugins))}, ios);
 	}
 
 	session::~session()
 	{
+		if (!m_impl) return;
+
 		aux::dump_call_profile();
-		TORRENT_ASSERT(m_impl);
 
 		// capture the shared_ptr in the dispatched function
 		// to keep the session_impl alive

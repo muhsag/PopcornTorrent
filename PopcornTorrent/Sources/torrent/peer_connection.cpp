@@ -143,7 +143,9 @@ namespace libtorrent {
 		, m_failed(false)
 		, m_connected(pack.tor.expired())
 		, m_request_large_blocks(false)
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		, m_share_mode(false)
+#endif
 		, m_upload_only(false)
 		, m_bitfield_received(false)
 		, m_no_download(false)
@@ -167,7 +169,9 @@ namespace libtorrent {
 		// if t is nullptr, we better not be connecting, since
 		// we can't decrement the connecting counter
 		TORRENT_ASSERT(t || !m_connecting);
+#if TORRENT_ABI_VERSION == 1
 		m_est_reciprocation_rate = m_settings.get_int(settings_pack::default_est_reciprocation_rate);
+#endif
 
 		m_channel_state[upload_channel] = peer_info::bw_idle;
 		m_channel_state[download_channel] = peer_info::bw_idle;
@@ -268,6 +272,7 @@ namespace libtorrent {
 		disconnect(ec, operation_t::unknown, peer_error);
 	}
 
+#if TORRENT_ABI_VERSION == 1
 	void peer_connection::increase_est_reciprocation_rate()
 	{
 		TORRENT_ASSERT(is_single_thread());
@@ -281,6 +286,7 @@ namespace libtorrent {
 		m_est_reciprocation_rate -= m_est_reciprocation_rate
 			* m_settings.get_int(settings_pack::decrease_est_reciprocation_rate) / 100;
 	}
+#endif
 
 	int peer_connection::get_priority(int const channel) const
 	{
@@ -628,6 +634,7 @@ namespace libtorrent {
 			return;
 		}
 
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 		if (t->super_seeding())
 		{
 #ifndef TORRENT_DISABLE_LOGGING
@@ -635,6 +642,7 @@ namespace libtorrent {
 #endif
 			return;
 		}
+#endif
 
 		if (upload_only())
 		{
@@ -767,7 +775,12 @@ namespace libtorrent {
 
 		m_have_piece.resize(t->torrent_file().num_pieces(), m_have_all);
 
-		if (m_have_all) m_num_pieces = t->torrent_file().num_pieces();
+		if (m_have_all)
+		{
+			m_num_pieces = t->torrent_file().num_pieces();
+			m_have_piece.set_all();
+		}
+
 #if TORRENT_USE_ASSERTS
 		TORRENT_ASSERT(!m_initialized);
 		m_initialized = true;
@@ -790,6 +803,7 @@ namespace libtorrent {
 
 			// if this is a web seed. we don't have a peer_info struct
 			t->set_seed(m_peer_info, true);
+			TORRENT_ASSERT(is_seed());
 			m_upload_only = true;
 
 			t->peer_has_all(this);
@@ -803,6 +817,8 @@ namespace libtorrent {
 			disconnect_if_redundant();
 			return;
 		}
+
+		TORRENT_ASSERT(!is_seed());
 
 		// if we're a seed, we don't keep track of piece availability
 		if (t->has_picker())
@@ -1014,7 +1030,7 @@ namespace libtorrent {
 			&& has_piece(index))
 		{
 #ifndef TORRENT_DISABLE_LOGGING
-			peer_log(peer_log_alert::outgoing_message, "HAVE", "piece: %d SUPRESSED"
+			peer_log(peer_log_alert::outgoing_message, "HAVE", "piece: %d SUPPRESSED"
 				, static_cast<int>(index));
 #endif
 			return;
@@ -1036,11 +1052,14 @@ namespace libtorrent {
 	bool peer_connection::has_piece(piece_index_t const i) const
 	{
 		TORRENT_ASSERT(is_single_thread());
+#if TORRENT_USE_ASSERTS
 		std::shared_ptr<torrent> t = m_torrent.lock();
 		TORRENT_ASSERT(t);
 		TORRENT_ASSERT(t->valid_metadata());
 		TORRENT_ASSERT(i >= piece_index_t(0));
 		TORRENT_ASSERT(i < t->torrent_file().end_piece());
+#endif
+		if (m_have_piece.empty()) return false;
 		return m_have_piece[i];
 	}
 
@@ -1135,6 +1154,7 @@ namespace libtorrent {
 			}
 		}
 #endif
+		if (bytes_payload > 0) m_last_sent_payload = clock_type::now();
 		if (m_ignore_stats) return;
 		std::shared_ptr<torrent> t = m_torrent.lock();
 		if (!t) return;
@@ -1604,8 +1624,9 @@ namespace libtorrent {
 		{
 			if (request_a_block(*t, *this))
 				m_counters.inc_stats_counter(counters::reject_piece_picks);
-			send_block_requests();
 		}
+
+		send_block_requests();
 	}
 
 	// -----------------------------
@@ -1733,9 +1754,10 @@ namespace libtorrent {
 		peer_log(peer_log_alert::incoming_message, "INTERESTED");
 #endif
 		if (m_peer_interested == false)
+		{
 			m_counters.inc_stats_counter(counters::num_peers_up_interested);
-
-		m_peer_interested = true;
+			m_peer_interested = true;
+		}
 		if (is_disconnecting()) return;
 
 		// if the peer is ready to download stuff, it must have metadata
@@ -1823,15 +1845,16 @@ namespace libtorrent {
 		}
 #endif
 
-		m_became_uninterested = aux::time_now();
-
 #ifndef TORRENT_DISABLE_LOGGING
 		peer_log(peer_log_alert::incoming_message, "NOT_INTERESTED");
 #endif
 		if (m_peer_interested)
+		{
 			m_counters.inc_stats_counter(counters::num_peers_up_interested, -1);
+			m_became_uninterested = aux::time_now();
+			m_peer_interested = false;
+		}
 
-		m_peer_interested = false;
 		if (is_disconnecting()) return;
 
 		std::shared_ptr<torrent> t = m_torrent.lock();
@@ -1908,8 +1931,7 @@ namespace libtorrent {
 
 		if (!t->valid_metadata() && index >= m_have_piece.end_index())
 		{
-			// TODO: 3 replace this magic number with something that makes sense
-			if (index < piece_index_t(524288))
+			if (index < piece_index_t(0x200000))
 			{
 				// if we don't have metadata
 				// and we might not have received a bitfield
@@ -1936,7 +1958,12 @@ namespace libtorrent {
 			return;
 		}
 
-		if (t->super_seeding() && !m_settings.get_bool(settings_pack::strict_super_seeding))
+#ifndef TORRENT_DISABLE_SUPERSEEDING
+		if (t->super_seeding()
+#if TORRENT_ABI_VERSION == 1
+			&& !m_settings.get_bool(settings_pack::strict_super_seeding)
+#endif
+			)
 		{
 			// if we're super-seeding and the peer just told
 			// us that it completed the piece we're super-seeding
@@ -1949,6 +1976,7 @@ namespace libtorrent {
 				superseed_piece(index, t->get_piece_to_super_seed(m_have_piece));
 			}
 		}
+#endif
 
 		if (m_have_piece[index])
 		{
@@ -1984,12 +2012,14 @@ namespace libtorrent {
 				, static_cast<void*>(m_peer_info));
 #endif
 
+			TORRENT_ASSERT(t->ready_for_connections());
 			TORRENT_ASSERT(m_have_piece.all_set());
 			TORRENT_ASSERT(m_have_piece.count() == m_have_piece.size());
 			TORRENT_ASSERT(m_have_piece.size() == t->torrent_file().num_pieces());
 
 			t->seen_complete();
 			t->set_seed(m_peer_info, true);
+			TORRENT_ASSERT(is_seed());
 			m_upload_only = true;
 
 #if TORRENT_USE_INVARIANT_CHECKS
@@ -2011,6 +2041,8 @@ namespace libtorrent {
 		disconnect_if_redundant();
 		if (is_disconnecting()) return;
 
+#ifndef TORRENT_DISABLE_SUPERSEEDING
+#if TORRENT_ABI_VERSION == 1
 		// if we're super seeding, this might mean that somebody
 		// forwarded this piece. In which case we need to give
 		// a new piece to that peer
@@ -2025,6 +2057,8 @@ namespace libtorrent {
 				p->superseed_piece(index, t->get_piece_to_super_seed(p->get_bitfield()));
 			}
 		}
+#endif // TORRENT_ABI_VERSION
+#endif // TORRENT_DISABLE_SUPERSEEDING
 	}
 
 	// -----------------------------
@@ -2080,10 +2114,11 @@ namespace libtorrent {
 			return;
 		}
 
-		bool was_seed = is_seed();
+		bool const was_seed = is_seed();
 		m_have_piece.clear_bit(index);
 		TORRENT_ASSERT(m_num_pieces > 0);
 		--m_num_pieces;
+		m_have_all = false;
 
 		// only update the piece_picker if
 		// we have the metadata and if
@@ -2094,7 +2129,10 @@ namespace libtorrent {
 		t->peer_lost(index, this);
 
 		if (was_seed)
+		{
 			t->set_seed(m_peer_info, false);
+			TORRENT_ASSERT(!is_seed());
+		}
 	}
 
 	// -----------------------------
@@ -2171,6 +2209,7 @@ namespace libtorrent {
 			m_have_piece = bits;
 			m_num_pieces = bits.count();
 			t->set_seed(m_peer_info, m_num_pieces == bits.size());
+			TORRENT_ASSERT(is_seed() == (m_num_pieces == bits.size()));
 
 #if TORRENT_USE_INVARIANT_CHECKS
 			if (t && t->has_picker())
@@ -2181,20 +2220,20 @@ namespace libtorrent {
 
 		TORRENT_ASSERT(t->valid_metadata());
 
-		int num_pieces = bits.count();
+		int const num_pieces = bits.count();
+		t->set_seed(m_peer_info, num_pieces == m_have_piece.size());
 		if (num_pieces == m_have_piece.size())
 		{
 #ifndef TORRENT_DISABLE_LOGGING
 			peer_log(peer_log_alert::info, "SEED", "this is a seed. p: %p"
 				, static_cast<void*>(m_peer_info));
 #endif
-
-			t->set_seed(m_peer_info, true);
 			m_upload_only = true;
 
 			m_have_piece.set_all();
 			m_num_pieces = num_pieces;
 			t->peer_has_all(this);
+			TORRENT_ASSERT(is_seed());
 
 			TORRENT_ASSERT(m_have_piece.all_set());
 			TORRENT_ASSERT(m_have_piece.count() == m_have_piece.size());
@@ -2243,8 +2282,10 @@ namespace libtorrent {
 		// metadata from us
 		if (!t->valid_metadata() || !has_metadata()) return false;
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		// don't close connections in share mode, we don't know if we need them
 		if (t->share_mode()) return false;
+#endif
 
 		if (m_upload_only && t->is_upload_only()
 			&& can_disconnect(errors::upload_upload_connection))
@@ -2310,6 +2351,7 @@ namespace libtorrent {
 			, "piece: %d s: %x l: %x", static_cast<int>(r.piece), r.start, r.length);
 #endif
 
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 		if (t->super_seeding()
 			&& !super_seeded_piece(r.piece))
 		{
@@ -2318,7 +2360,7 @@ namespace libtorrent {
 #ifndef TORRENT_DISABLE_LOGGING
 			if (should_log(peer_log_alert::info))
 			{
-				peer_log(peer_log_alert::info, "INVALID_REQUEST", "piece not superseeded "
+				peer_log(peer_log_alert::info, "INVALID_REQUEST", "piece not super-seeded "
 					"i: %d t: %d n: %d h: %d ss1: %d ss2: %d"
 					, m_peer_interested
 					, valid_piece_index
@@ -2343,6 +2385,7 @@ namespace libtorrent {
 			}
 			return;
 		}
+#endif // TORRENT_DISABLE_SUPERSEEDING
 
 		// if we haven't received a bitfield, it was
 		// probably omitted, which is the same as 'have_none'
@@ -2425,7 +2468,9 @@ namespace libtorrent {
 		if (r.piece < piece_index_t(0)
 			|| r.piece >= t->torrent_file().end_piece()
 			|| (!t->has_piece_passed(r.piece)
+#ifndef TORRENT_DISABLE_PREDICTIVE_PIECES
 				&& !t->is_predictive_piece(r.piece)
+#endif
 				&& !t->seed_mode())
 			|| r.start < 0
 			|| r.start >= ti.piece_size(r.piece)
@@ -2567,7 +2612,7 @@ namespace libtorrent {
 	{
 		TORRENT_ASSERT(is_single_thread());
 		m_last_piece = aux::time_now();
-		TORRENT_ASSERT(m_outstanding_bytes >= bytes);
+		TORRENT_ASSERT_VAL(m_outstanding_bytes >= bytes, m_outstanding_bytes - bytes);
 		m_outstanding_bytes -= bytes;
 		if (m_outstanding_bytes < 0) m_outstanding_bytes = 0;
 		std::shared_ptr<torrent> t = associated_torrent().lock();
@@ -2870,8 +2915,7 @@ namespace libtorrent {
 
 		// we received a request within the timeout, make sure this peer is
 		// not snubbed anymore
-		if (total_seconds(now - m_requested)
-			< request_timeout()
+		if (total_seconds(now - m_requested) < request_timeout()
 			&& m_snubbed)
 		{
 			m_snubbed = false;
@@ -2954,6 +2998,7 @@ namespace libtorrent {
 		// if we requested this block from other peers, cancel it now
 		if (multi) t->cancel_block(block_finished);
 
+#ifndef TORRENT_DISABLE_PREDICTIVE_PIECES
 		if (m_settings.get_int(settings_pack::predictive_piece_announce))
 		{
 			piece_index_t const piece = block_finished.piece_index;
@@ -2989,6 +3034,7 @@ namespace libtorrent {
 				}
 			}
 		}
+#endif // TORRENT_DISABLE_PREDICTIVE_PIECES
 
 		TORRENT_ASSERT(picker.num_peers(block_finished) == 0);
 
@@ -3341,9 +3387,12 @@ namespace libtorrent {
 
 		t->set_seed(m_peer_info, false);
 		m_bitfield_received = true;
+		m_have_all = false;
 
 		m_have_piece.clear_all();
 		m_num_pieces = 0;
+
+		TORRENT_ASSERT(!is_seed());
 
 		// if the peer is ready to download stuff, it must have metadata
 		m_has_metadata = true;
@@ -3799,8 +3848,11 @@ namespace libtorrent {
 		if (m_interesting) return;
 		std::shared_ptr<torrent> t = m_torrent.lock();
 		if (!t->ready_for_connections()) return;
-		m_interesting = true;
-		m_counters.inc_stats_counter(counters::num_peers_down_interested);
+		if (!m_interesting)
+		{
+			m_interesting = true;
+			m_counters.inc_stats_counter(counters::num_peers_down_interested);
+		}
 		write_interested();
 
 #ifndef TORRENT_DISABLE_LOGGING
@@ -3823,16 +3875,19 @@ namespace libtorrent {
 
 		std::shared_ptr<torrent> t = m_torrent.lock();
 		if (!t->ready_for_connections()) return;
-		m_interesting = false;
+		if (m_interesting)
+		{
+			m_interesting = false;
+			m_became_uninteresting = aux::time_now();
+			m_counters.inc_stats_counter(counters::num_peers_down_interested, -1);
+		}
+
 		m_slow_start = false;
-		m_counters.inc_stats_counter(counters::num_peers_down_interested, -1);
 
 		disconnect_if_redundant();
 		if (m_disconnecting) return;
 
 		write_not_interested();
-
-		m_became_uninteresting = aux::time_now();
 
 #ifndef TORRENT_DISABLE_LOGGING
 		if (should_log(peer_log_alert::outgoing_message))
@@ -3921,8 +3976,7 @@ namespace libtorrent {
 		// we can't download pieces in these states
 		if (t->state() == torrent_status::checking_files
 			|| t->state() == torrent_status::checking_resume_data
-			|| t->state() == torrent_status::downloading_metadata
-			|| t->state() == torrent_status::allocating)
+			|| t->state() == torrent_status::downloading_metadata)
 			return;
 
 		if (int(m_download_queue.size()) >= m_desired_queue_size
@@ -4540,7 +4594,6 @@ namespace libtorrent {
 		p.flags = {};
 		get_specific_peer_info(p);
 
-		if (is_seed()) p.flags |= peer_info::seed;
 		if (m_snubbed) p.flags |= peer_info::snubbed;
 		if (m_upload_only) p.flags |= peer_info::upload_only;
 		if (m_endgame_mode) p.flags |= peer_info::endgame_mode;
@@ -4554,9 +4607,11 @@ namespace libtorrent {
 			p.num_hashfails = pi->hashfails;
 			if (pi->on_parole) p.flags |= peer_info::on_parole;
 			if (pi->optimistically_unchoked) p.flags |= peer_info::optimistic_unchoke;
+			if (pi->seed) p.flags |= peer_info::seed;
 		}
 		else
 		{
+			if (is_seed()) p.flags |= peer_info::seed;
 			p.source = {};
 			p.failcount = 0;
 			p.num_hashfails = 0;
@@ -4589,12 +4644,15 @@ namespace libtorrent {
 			p.progress_ppm = int(std::int64_t(p.pieces.count()) * 1000000 / p.pieces.size());
 		}
 
+#if TORRENT_ABI_VERSION == 1
 		p.estimated_reciprocation_rate = m_est_reciprocation_rate;
+#endif
 
 		error_code ec;
 		p.local_endpoint = get_socket()->local_endpoint(ec);
 	}
 
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 	// TODO: 3 new_piece should be an optional<piece_index_t>. piece index -1
 	// should not be allowed
 	void peer_connection::superseed_piece(piece_index_t const replace_piece
@@ -4643,6 +4701,7 @@ namespace libtorrent {
 		m_superseed_piece[1] = m_superseed_piece[0];
 		m_superseed_piece[0] = new_piece;
 	}
+#endif // TORRENT_DISABLE_SUPERSEEDING
 
 	void peer_connection::max_out_request_queue(int s)
 	{
@@ -4778,6 +4837,7 @@ namespace libtorrent {
 			send_block_requests();
 		}
 
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 		if (t->super_seeding()
 			&& t->ready_for_connections()
 			&& !m_peer_interested
@@ -4787,6 +4847,7 @@ namespace libtorrent {
 			// become interested in us then
 			superseed_piece(piece_index_t(-1), t->get_piece_to_super_seed(m_have_piece));
 		}
+#endif
 
 		on_tick();
 		if (is_disconnecting()) return;
@@ -4801,7 +4862,7 @@ namespace libtorrent {
 
 		// if the peer hasn't said a thing for a certain
 		// time, it is considered to have timed out
-		time_duration d = std::min(now - m_last_receive, now - m_last_sent);
+		time_duration d = now - m_last_receive;
 
 		if (m_connecting)
 		{
@@ -4829,16 +4890,19 @@ namespace libtorrent {
 			}
 		}
 
-		// if we can't read, it means we're blocked on the rate-limiter
-		// or the disk, not the peer itself. In this case, don't blame
-		// the peer and disconnect it
-		bool const may_timeout = bool(m_channel_state[download_channel] & peer_info::bw_network);
+		// if the bw_network flag isn't set, it means we are not even trying to
+		// read from this peer's socket. Most likely because we're applying a
+		// rate limit. If the peer is "slow" because we are rate limiting it,
+		// don't enforce timeouts. However, as soon as we *do* read from the
+		// socket, we expect to receive data, and not have timed out. Then we
+		// can enforce the timeouts.
+		bool const reading_socket = bool(m_channel_state[download_channel] & peer_info::bw_network);
 
 		// TODO: 2 use a deadline_timer for timeouts. Don't rely on second_tick()!
 		// Hook this up to connect timeout as well. This would improve performance
 		// because of less work in second_tick(), and might let use remove ticking
 		// entirely eventually
-		if (may_timeout && d > seconds(timeout()) && !m_connecting && m_reading_bytes == 0
+		if (reading_socket && d > seconds(timeout()) && !m_connecting && m_reading_bytes == 0
 			&& can_disconnect(errors::timed_out_inactivity))
 		{
 #ifndef TORRENT_DISABLE_LOGGING
@@ -4854,7 +4918,7 @@ namespace libtorrent {
 #if TORRENT_USE_I2P
 		timeout *= is_i2p(*m_socket) ? 4 : 1;
 #endif
-		if (may_timeout
+		if (reading_socket
 			&& !m_connecting
 			&& in_handshake()
 			&& d > seconds(timeout))
@@ -4874,7 +4938,7 @@ namespace libtorrent {
 		d = now - std::max(std::max(m_last_unchoke, m_last_incoming_request)
 			, m_last_sent_payload);
 
-		if (may_timeout
+		if (reading_socket
 			&& !m_connecting
 			&& m_requests.empty()
 			&& m_reading_bytes == 0
@@ -4900,16 +4964,22 @@ namespace libtorrent {
 		time_duration const time_limit = seconds(
 			m_settings.get_int(settings_pack::inactivity_timeout));
 
+		// if we are close enough to the limit, consider the peer connection
+		// list full. This will enable the inactive timeout
+		bool const max_session_conns = m_ses.num_connections()
+			>= m_settings.get_int(settings_pack::connections_limit) - 5;
+		bool const max_torrent_conns = t && t->num_peers()
+			>= t->max_connections() - 5;
+
 		// don't bother disconnect peers we haven't been interested
 		// in (and that hasn't been interested in us) for a while
 		// unless we have used up all our connection slots
-		if (may_timeout
+		if (reading_socket
 			&& !m_interesting
 			&& !m_peer_interested
 			&& d1 > time_limit
 			&& d2 > time_limit
-			&& (m_ses.num_connections() >= m_settings.get_int(settings_pack::connections_limit)
-				|| (t && t->num_peers() >= t->max_connections()))
+			&& (max_session_conns || max_torrent_conns)
 			&& can_disconnect(errors::timed_out_no_interest))
 		{
 #ifndef TORRENT_DISABLE_LOGGING
@@ -4923,7 +4993,7 @@ namespace libtorrent {
 			return;
 		}
 
-		if (may_timeout
+		if (reading_socket
 			&& !m_download_queue.empty()
 			&& m_quota[download_channel] > 0
 			&& now > m_requested + seconds(request_timeout()))
@@ -5112,7 +5182,9 @@ namespace libtorrent {
 		INVARIANT_CHECK;
 #endif
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		bool sent_a_piece = false;
+#endif
 		std::shared_ptr<torrent> t = m_torrent.lock();
 		if (!t || t->is_aborted() || m_requests.empty()) return;
 
@@ -5201,11 +5273,13 @@ namespace libtorrent {
 
 			if (!t->has_piece_passed(r.piece) && !seed_mode)
 			{
+#ifndef TORRENT_DISABLE_PREDICTIVE_PIECES
 				// we don't have this piece yet, but we anticipate to have
 				// it very soon, so we have told our peers we have it.
 				// hold off on sending it. If the piece fails later
 				// we will reject this request
 				if (t->is_predictive_piece(r.piece)) continue;
+#endif
 #ifndef TORRENT_DISABLE_LOGGING
 				peer_log(peer_log_alert::outgoing_message, "REJECT_PIECE"
 					, "piece: %d s: %x l: %x piece not passed hash check"
@@ -5220,7 +5294,9 @@ namespace libtorrent {
 					, "piece: %d s: %x l: %x", static_cast<int>(r.piece), r.start, r.length);
 #endif
 				m_reading_bytes += r.length;
+#ifndef TORRENT_DISABLE_SHARE_MODE
 				sent_a_piece = true;
+#endif
 
 				// the callback function may be called immediately, instead of being posted
 
@@ -5242,8 +5318,10 @@ namespace libtorrent {
 			--i;
 		}
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		if (t->share_mode() && sent_a_piece)
 			t->recalc_share_mode();
+#endif
 	}
 
 	// this is called when a previously unchecked piece has been
@@ -6388,7 +6466,10 @@ namespace libtorrent {
 
 		// in share mode we don't close redundant connections
 		if (m_settings.get_bool(settings_pack::close_redundant_connections)
-			&& !t->share_mode())
+#ifndef TORRENT_DISABLE_SHARE_MODE
+			&& !t->share_mode()
+#endif
+			)
 		{
 			bool const ok_to_disconnect =
 				can_disconnect(errors::upload_upload_connection)
@@ -6552,6 +6633,7 @@ namespace libtorrent {
 	bool peer_connection::is_seed() const
 	{
 		TORRENT_ASSERT(is_single_thread());
+
 		// if m_num_pieces == 0, we probably don't have the
 		// metadata yet.
 		std::shared_ptr<torrent> t = m_torrent.lock();
@@ -6559,6 +6641,7 @@ namespace libtorrent {
 			&& m_num_pieces > 0 && t && t->valid_metadata();
 	}
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 	void peer_connection::set_share_mode(bool u)
 	{
 		TORRENT_ASSERT(is_single_thread());
@@ -6567,17 +6650,16 @@ namespace libtorrent {
 
 		m_share_mode = u;
 	}
+#endif
 
 	void peer_connection::set_upload_only(bool u)
 	{
 		TORRENT_ASSERT(is_single_thread());
 		// if the peer is a seed, don't allow setting
 		// upload_only to false
-		if (m_upload_only || is_seed()) return;
+		if (m_upload_only && is_seed()) return;
 
 		m_upload_only = u;
-		std::shared_ptr<torrent> t = associated_torrent().lock();
-		t->set_seed(m_peer_info, u);
 		disconnect_if_redundant();
 	}
 

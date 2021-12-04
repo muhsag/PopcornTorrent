@@ -50,22 +50,57 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/error_code.hpp"
 #include "libtorrent/socket.hpp"
 #include "libtorrent/aux_/bind_to_device.hpp"
+#include "libtorrent/span.hpp"
+#include "libtorrent/flags.hpp"
 
 #include <vector>
 
 namespace libtorrent {
 
-	// the interface should not have a netmask
+using interface_flags = flags::bitfield_flag<std::uint32_t, struct interface_flags_tag>;
+
+namespace if_flags {
+
+	constexpr interface_flags up = 0_bit;
+	constexpr interface_flags broadcast = 1_bit;
+	constexpr interface_flags loopback = 2_bit;
+	constexpr interface_flags pointopoint = 3_bit;
+	constexpr interface_flags running = 4_bit;
+	constexpr interface_flags noarp = 5_bit;
+	constexpr interface_flags promisc = 6_bit;
+	constexpr interface_flags allmulti = 7_bit;
+	constexpr interface_flags master = 8_bit;
+	constexpr interface_flags slave = 9_bit;
+	constexpr interface_flags multicast = 10_bit;
+	constexpr interface_flags dynamic = 11_bit;
+	constexpr interface_flags lower_up = 12_bit;
+	constexpr interface_flags dormant = 13_bit;
+}
+
+enum class if_state : std::uint8_t {
+
+	up,
+	dormant,
+	lowerlayerdown,
+	down,
+	notpresent,
+	testing,
+	unknown
+};
+
 	struct ip_interface
 	{
 		address interface_address;
 		address netmask;
-		char name[64];
-		char friendly_name[128];
-		char description[128];
+		char name[64]{};
+		char friendly_name[128]{};
+		char description[128]{};
 		// an interface is preferred if its address is
 		// not tentative/duplicate/deprecated
 		bool preferred = true;
+
+		interface_flags flags = if_flags::up;
+		if_state state = if_state::unknown;
 	};
 
 	struct ip_route
@@ -73,8 +108,9 @@ namespace libtorrent {
 		address destination;
 		address netmask;
 		address gateway;
-		char name[64];
-		int mtu;
+		address source_hint;
+		char name[64]{};
+		int mtu = 0;
 	};
 
 	// returns a list of the configured IP interfaces
@@ -85,23 +121,27 @@ namespace libtorrent {
 	TORRENT_EXTRA_EXPORT std::vector<ip_route> enum_routes(io_service& ios
 		, error_code& ec);
 
+	// returns AF_INET or AF_INET6, depending on the address' family
+	TORRENT_EXTRA_EXPORT int family(address const& a);
+
 	// return (a1 & mask) == (a2 & mask)
 	TORRENT_EXTRA_EXPORT bool match_addr_mask(address const& a1
 		, address const& a2, address const& mask);
 
-	// returns true if the specified address is on the same
-	// local network as us
-	TORRENT_EXTRA_EXPORT bool in_local_network(io_service& ios, address const& addr
-		, error_code& ec);
-	TORRENT_EXTRA_EXPORT bool in_local_network(std::vector<ip_interface> const& net
-		, address const& addr);
+	// return a netmask with the specified address family and the specified
+	// number of prefix bit set, of the most significant bits in the resulting
+	// netmask
+	TORRENT_EXTRA_EXPORT address build_netmask(int bits, int family);
 
-	TORRENT_EXTRA_EXPORT boost::optional<ip_route> get_default_route(io_service& ios
-		, string_view device, bool v6, error_code& ec);
+	// return the gateway for the given ip_interface, if there is one. Otherwise
+	// return nullopt.
+	TORRENT_EXTRA_EXPORT boost::optional<address> get_gateway(
+		ip_interface const& iface, span<ip_route const> routes);
 
-	// returns the first default gateway found if device is empty
-	TORRENT_EXTRA_EXPORT address get_default_gateway(io_service& ios
-		, string_view device, bool v6, error_code& ec);
+	// returns whether there is a route to the specified device for for any global
+	// internet address of the specified address family.
+	TORRENT_EXTRA_EXPORT bool has_internet_route(string_view device, int family
+		, span<ip_route const> routes);
 
 	// attempt to bind socket to the device with the specified name. For systems
 	// that don't support SO_BINDTODEVICE the socket will be bound to one of the
@@ -136,7 +176,7 @@ namespace libtorrent {
 #if TORRENT_HAS_BINDTODEVICE
 		// try to use SO_BINDTODEVICE here, if that exists. If it fails,
 		// fall back to the mechanism we have below
-		sock.set_option(aux::bind_to_device(device_name), ec);
+		aux::bind_device(sock, device_name, ec);
 		if (ec)
 #endif
 		{

@@ -55,6 +55,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/peer_info.hpp" // for peer_list_entry
 #endif
 
+#if TORRENT_ABI_VERSION == 1 && defined TORRENT_WINDOWS
+#include "libtorrent/aux_/escape_string.hpp"
+#endif
+
 using libtorrent::aux::session_impl;
 
 namespace libtorrent {
@@ -242,16 +246,18 @@ namespace libtorrent {
 		async_call(&torrent::move_storage, save_path, static_cast<move_flags_t>(flags));
 	}
 
+#if defined TORRENT_WINDOWS
 	void torrent_handle::move_storage(
 		std::wstring const& save_path, int flags) const
 	{
-		async_call(&torrent::move_storage, wchar_utf8(save_path), static_cast<move_flags_t>(flags));
+		async_call(&torrent::move_storage, convert_from_wstring(save_path), static_cast<move_flags_t>(flags));
 	}
 
 	void torrent_handle::rename_file(file_index_t index, std::wstring const& new_name) const
 	{
-		async_call(&torrent::rename_file, index, wchar_utf8(new_name));
+		async_call(&torrent::rename_file, index, convert_from_wstring(new_name));
 	}
+#endif // TORRENT_WINDOWS
 #endif // TORRENT_ABI_VERSION
 
 	void torrent_handle::rename_file(file_index_t index, std::string const& new_name) const
@@ -310,7 +316,12 @@ namespace libtorrent {
 	{ async_call(&torrent::set_upload_mode, b); }
 
 	void torrent_handle::set_share_mode(bool b) const
-	{ async_call(&torrent::set_share_mode, b); }
+	{
+		TORRENT_UNUSED(b);
+#ifndef TORRENT_DISABLE_SHARE_MODE
+		async_call(&torrent::set_share_mode, b);
+#endif
+	}
 
 	void torrent_handle::apply_ip_filter(bool b) const
 	{ async_call(&torrent::set_apply_ip_filter, b); }
@@ -598,7 +609,13 @@ namespace libtorrent {
 	{ return sync_call_ret<bool>(false, &torrent::valid_metadata); }
 
 	bool torrent_handle::super_seeding() const
-	{ return sync_call_ret<bool>(false, &torrent::super_seeding); }
+	{
+#ifndef TORRENT_DISABLE_SUPERSEEDING
+		return sync_call_ret<bool>(false, &torrent::super_seeding);
+#else
+		return false;
+#endif
+	}
 
 // ============ end deprecation ===============
 #endif
@@ -707,7 +724,7 @@ namespace libtorrent {
 	{
 		add_torrent_params params;
 		auto retr = std::ref(params);
-		sync_call(&torrent::write_resume_data, retr);
+		sync_call(&torrent::write_resume_data, resume_data_flags_t{}, retr);
 		return libtorrent::write_resume_data(params);
 	}
 
@@ -727,6 +744,11 @@ namespace libtorrent {
 		, peer_source_flags_t const source, pex_flags_t const flags) const
 	{
 		async_call(&torrent::add_peer, adr, source, flags);
+	}
+
+	void torrent_handle::clear_peers()
+	{
+		async_call(&torrent::clear_peers);
 	}
 
 #if TORRENT_ABI_VERSION == 1
@@ -776,7 +798,10 @@ namespace libtorrent {
 #if TORRENT_ABI_VERSION == 1
 	void torrent_handle::super_seeding(bool on) const
 	{
+		TORRENT_UNUSED(on);
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 		async_call(&torrent::set_super_seeding, on);
+#endif
 	}
 
 	void torrent_handle::get_full_peer_list(std::vector<peer_list_entry>& v) const
@@ -801,17 +826,29 @@ namespace libtorrent {
 	void torrent_handle::set_piece_deadline(piece_index_t index, int deadline
 		, deadline_flags_t const flags) const
 	{
+#ifndef TORRENT_DISABLE_STREAMING
 		async_call(&torrent::set_piece_deadline, index, deadline, flags);
+#else
+		TORRENT_UNUSED(deadline);
+		if (flags & alert_when_available)
+			async_call(&torrent::read_piece, index);
+#endif
 	}
 
 	void torrent_handle::reset_piece_deadline(piece_index_t index) const
 	{
+#ifndef TORRENT_DISABLE_STREAMING
 		async_call(&torrent::reset_piece_deadline, index);
+#else
+		TORRENT_UNUSED(index);
+#endif
 	}
 
 	void torrent_handle::clear_piece_deadlines() const
 	{
+#ifndef TORRENT_DISABLE_STREAMING
 		async_call(&torrent::clear_time_critical);
+#endif
 	}
 
 	std::shared_ptr<torrent> torrent_handle::native_handle() const
@@ -825,6 +862,9 @@ namespace libtorrent {
 		// for expired weak_ptrs. So, we're left with a hack
 		return std::size_t(*reinterpret_cast<void* const*>(&th.m_torrent));
 	}
+
+	bool torrent_handle::in_session() const
+	{ return !sync_call_ret<bool>(false, &torrent::is_aborted); }
 
 	static_assert(std::is_nothrow_move_constructible<torrent_handle>::value
 		, "should be nothrow move constructible");

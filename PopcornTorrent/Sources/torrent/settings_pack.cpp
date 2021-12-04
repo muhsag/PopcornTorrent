@@ -124,7 +124,7 @@ constexpr int CLOSE_FILE_INTERVAL = 0;
 		SET(proxy_username, "", &session_impl::update_proxy),
 		SET(proxy_password, "", &session_impl::update_proxy),
 		SET(i2p_hostname, "", &session_impl::update_i2p_bridge),
-		SET(peer_fingerprint, "-LT1230-", nullptr),
+		SET(peer_fingerprint, "-LT12E0-", nullptr),
 		SET(dht_bootstrap_nodes, "dht.libtorrent.org:25401", &session_impl::update_dht_bootstrap_nodes)
 	}});
 
@@ -159,7 +159,7 @@ constexpr int CLOSE_FILE_INTERVAL = 0;
 		SET(announce_to_all_trackers, false, nullptr),
 		SET(announce_to_all_tiers, false, nullptr),
 		SET(prefer_udp_trackers, true, nullptr),
-		SET(strict_super_seeding, false, nullptr),
+		DEPRECATED_SET(strict_super_seeding, false, nullptr),
 		DEPRECATED_SET(lock_disk_cache, false, nullptr),
 		SET(disable_hash_checks, false, nullptr),
 		SET(allow_i2p_mixed, false, nullptr),
@@ -170,14 +170,14 @@ constexpr int CLOSE_FILE_INTERVAL = 0;
 		SET(incoming_starts_queued_torrents, false, nullptr),
 		SET(report_true_downloaded, false, nullptr),
 		SET(strict_end_game_mode, true, nullptr),
-		SET(broadcast_lsd, true, nullptr),
+		DEPRECATED_SET(broadcast_lsd, true, nullptr),
 		SET(enable_outgoing_utp, true, nullptr),
 		SET(enable_incoming_utp, true, nullptr),
 		SET(enable_outgoing_tcp, true, nullptr),
 		SET(enable_incoming_tcp, true, nullptr),
 		SET(ignore_resume_timestamps, false, nullptr),
 		SET(no_recheck_incomplete_resume, false, nullptr),
-		SET(anonymous_mode, false, &session_impl::update_anonymous_mode),
+		SET(anonymous_mode, false, nullptr),
 		SET(report_web_seed_downloads, true, &session_impl::update_report_web_seed_downloads),
 		DEPRECATED_SET(rate_limit_utp, true, &session_impl::update_rate_limit_utp),
 		DEPRECATED_SET(announce_double_nat, false, nullptr),
@@ -210,6 +210,9 @@ constexpr int CLOSE_FILE_INTERVAL = 0;
 		SET(enable_ip_notifier, true, &session_impl::update_ip_notifier),
 		SET(dht_prefer_verified_node_ids, true, &session_impl::update_dht_settings),
 		SET(piece_extent_affinity, false, nullptr),
+		SET(validate_https_trackers, true, &session_impl::update_validate_https),
+		SET(ssrf_mitigation, true, nullptr),
+		SET(allow_idna, false, nullptr),
 	}});
 
 	aux::array<int_setting_entry_t, settings_pack::num_int_settings> const int_settings
@@ -297,7 +300,7 @@ constexpr int CLOSE_FILE_INTERVAL = 0;
 		SET(download_rate_limit, 0, &session_impl::update_download_rate),
 		DEPRECATED_SET(local_upload_rate_limit, 0, &session_impl::update_local_upload_rate),
 		DEPRECATED_SET(local_download_rate_limit, 0, &session_impl::update_local_download_rate),
-		DEPRECATED_SET(dht_upload_rate_limit, 4000, &session_impl::update_dht_upload_rate_limit),
+		SET(dht_upload_rate_limit, 8000, &session_impl::update_dht_upload_rate_limit),
 		SET(unchoke_slots_limit, 8, &session_impl::update_unchoke_limit),
 		DEPRECATED_SET(half_open_limit, 0, nullptr),
 		SET(connections_limit, 200, &session_impl::update_connections_limit),
@@ -332,7 +335,7 @@ constexpr int CLOSE_FILE_INTERVAL = 0;
 		SET(connect_seed_every_n_download, 10, nullptr),
 		SET(max_http_recv_buffer_size, 4*1024*204, nullptr),
 		SET(max_retry_port_bind, 10, nullptr),
-		SET(alert_mask, int(static_cast<std::uint32_t>(alert::error_notification)), &session_impl::update_alert_mask),
+		SET(alert_mask, int(static_cast<std::uint32_t>(alert_category::error)), &session_impl::update_alert_mask),
 		SET(out_enc_policy, settings_pack::pe_enabled, nullptr),
 		SET(in_enc_policy, settings_pack::pe_enabled, nullptr),
 		SET(allowed_enc_level, settings_pack::pe_both, nullptr),
@@ -348,6 +351,10 @@ constexpr int CLOSE_FILE_INTERVAL = 0;
 		SET(utp_cwnd_reduce_timer, 100, nullptr),
 		SET(max_web_seed_connections, 3, nullptr),
 		SET(resolver_cache_timeout, 1200, &session_impl::update_resolver_cache_timeout),
+		SET(send_not_sent_low_watermark, 16384, nullptr),
+		SET(rate_choker_initial_threshold, 1024, nullptr),
+		SET(upnp_lease_duration, 3600, nullptr),
+		SET(max_concurrent_http_announces, 50, nullptr),
 	}});
 
 #undef SET
@@ -526,6 +533,12 @@ constexpr int CLOSE_FILE_INTERVAL = 0;
 			ret.set_bool(settings_pack::bool_type_base + i, bool_settings[i].default_value);
 		}
 		return ret;
+	}
+
+	int default_int_value(int const name)
+	{
+		TORRENT_ASSERT((name & settings_pack::type_mask) == settings_pack::int_type_base);
+		return int_settings[name - settings_pack::int_type_base].default_value;
 	}
 
 	void apply_pack(settings_pack const* pack, aux::session_settings& sett

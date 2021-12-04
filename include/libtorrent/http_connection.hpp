@@ -73,6 +73,7 @@ using http_handler = std::function<void(error_code const&
 using http_connect_handler = std::function<void(http_connection&)>;
 
 using http_filter_handler = std::function<void(http_connection&, std::vector<tcp::endpoint>&)>;
+using hostname_filter_handler = std::function<bool(http_connection&, string_view)>;
 
 // when bottled, the last two arguments to the handler
 // will always be 0
@@ -82,12 +83,13 @@ struct TORRENT_EXTRA_EXPORT http_connection
 	http_connection(io_service& ios
 		, resolver_interface& resolver
 		, http_handler const& handler
-		, bool bottled = true
-		, int max_bottled_buffer_size = default_max_bottled_buffer_size
-		, http_connect_handler const& ch = http_connect_handler()
-		, http_filter_handler const& fh = http_filter_handler()
+		, bool bottled
+		, int max_bottled_buffer_size
+		, http_connect_handler const& ch
+		, http_filter_handler const& fh
+		, hostname_filter_handler const& hfh
 #ifdef TORRENT_USE_OPENSSL
-		, ssl::context* ssl_ctx = nullptr
+		, ssl::context* ssl_ctx
 #endif
 		);
 
@@ -130,6 +132,8 @@ struct TORRENT_EXTRA_EXPORT http_connection
 
 	std::vector<tcp::endpoint> const& endpoints() const { return m_endpoints; }
 
+	std::string const& url() const { return m_url; }
+
 private:
 
 #if TORRENT_USE_I2P
@@ -165,7 +169,6 @@ private:
 
 #ifdef TORRENT_USE_OPENSSL
 	ssl::context* m_ssl_ctx;
-	bool m_own_ssl_context;
 #endif
 
 #if TORRENT_USE_I2P
@@ -177,9 +180,9 @@ private:
 	http_handler m_handler;
 	http_connect_handler m_connect_handler;
 	http_filter_handler m_filter_handler;
+	hostname_filter_handler m_hostname_filter_handler;
 	deadline_timer m_timer;
 
-	time_duration m_read_timeout;
 	time_duration m_completion_timeout;
 
 	// the timer fires every 250 millisecond as long
@@ -231,20 +234,23 @@ private:
 	bool m_bottled;
 
 	// set to true the first time the handler is called
-	bool m_called;
+	bool m_called = false;
 
 	// only hand out new quota 4 times a second if the
 	// quota is 0. If it isn't 0 wait for it to reach
 	// 0 and continue to hand out quota at that time.
-	bool m_limiter_timer_active;
+	bool m_limiter_timer_active = false;
 
 	// true if the connection is using ssl
-	bool m_ssl;
+	bool m_ssl = false;
 
-	bool m_abort;
+	bool m_abort = false;
 
 	// true while waiting for an async_connect
-	bool m_connecting;
+	bool m_connecting = false;
+
+	// true while resolving hostname
+	bool m_resolving_host = false;
 };
 
 }

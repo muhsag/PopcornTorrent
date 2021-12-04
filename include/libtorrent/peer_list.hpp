@@ -62,7 +62,6 @@ namespace libtorrent {
 	// the peer_list type not depend on the torrent type directly.
 	struct torrent_state
 	{
-		bool is_paused = false;
 		bool is_finished = false;
 		bool allow_multiple_connections_per_ip = false;
 
@@ -96,10 +95,8 @@ namespace libtorrent {
 	struct erase_peer_flags_tag;
 	using erase_peer_flags_t = flags::bitfield_flag<std::uint8_t, erase_peer_flags_tag>;
 
-	class TORRENT_EXTRA_EXPORT peer_list : single_threaded
+	struct TORRENT_EXTRA_EXPORT peer_list : single_threaded
 	{
-	public:
-
 		explicit peer_list(torrent_peer_allocator_interface& alloc);
 		~peer_list();
 
@@ -205,10 +202,6 @@ namespace libtorrent {
 			, pex_flags_t flags, tcp::endpoint const& remote);
 		bool insert_peer(torrent_peer* p, iterator iter
 			, pex_flags_t flags, torrent_state* state);
-
-		bool compare_peer_erase(torrent_peer const& lhs, torrent_peer const& rhs) const;
-		bool compare_peer(torrent_peer const* lhs, torrent_peer const* rhs
-			, external_ip const& external, int source_port) const;
 
 		void find_connect_candidates(std::vector<torrent_peer*>& peers
 			, int session_time, torrent_state* state);

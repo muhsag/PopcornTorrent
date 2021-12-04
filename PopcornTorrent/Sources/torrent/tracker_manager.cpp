@@ -37,6 +37,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/udp_tracker_connection.hpp"
 #include "libtorrent/aux_/io.hpp"
 #include "libtorrent/aux_/session_interface.hpp"
+#include "libtorrent/aux_/session_settings.hpp"
 #include "libtorrent/performance_counters.hpp"
 #include "libtorrent/socket_io.hpp"
 
@@ -236,6 +237,23 @@ namespace libtorrent {
 		if (i != m_http_conns.end())
 		{
 			m_http_conns.erase(i);
+			if (!m_queued.empty())
+			{
+				auto conn = std::move(m_queued.front());
+				m_queued.pop_front();
+				m_http_conns.push_back(std::move(conn));
+				m_http_conns.back()->start();
+				m_stats_counters.set_value(counters::num_queued_tracker_announces, std::int64_t(m_queued.size()));
+			}
+			return;
+		}
+
+		auto const j = std::find_if(m_queued.begin(), m_queued.end()
+			, [c] (std::shared_ptr<http_tracker_connection> const& ptr) { return ptr.get() == c; });
+		if (j != m_queued.end())
+		{
+			m_queued.erase(j);
+			m_stats_counters.set_value(counters::num_queued_tracker_announces, std::int64_t(m_queued.size()));
 		}
 	}
 
@@ -257,6 +275,7 @@ namespace libtorrent {
 	void tracker_manager::queue_request(
 		io_service& ios
 		, tracker_request&& req
+		, aux::session_settings const& sett
 		, std::weak_ptr<request_callback> c)
 	{
 		TORRENT_ASSERT(is_single_thread());
@@ -279,8 +298,16 @@ namespace libtorrent {
 #endif
 		{
 			auto con = std::make_shared<http_tracker_connection>(ios, *this, std::move(req), c);
-			m_http_conns.push_back(con);
-			con->start();
+			if (m_http_conns.size() < std::size_t(sett.get_int(settings_pack::max_concurrent_http_announces)))
+			{
+				m_http_conns.push_back(std::move(con));
+				m_http_conns.back()->start();
+			}
+			else
+			{
+				m_queued.push_back(std::move(con));
+				m_stats_counters.set_value(counters::num_queued_tracker_announces, std::int64_t(m_queued.size()));
+			}
 			return;
 		}
 		else if (protocol == "udp")
@@ -398,6 +425,12 @@ namespace libtorrent {
 		m_send_fun(sock, ep, p, ec, flags);
 	}
 
+	void tracker_manager::stop()
+	{
+		abort_all_requests();
+		m_abort = true;
+	}
+
 	void tracker_manager::abort_all_requests(bool all)
 	{
 		// this is called from the destructor too, which is not subject to the
@@ -405,10 +438,22 @@ namespace libtorrent {
 		TORRENT_ASSERT(all || is_single_thread());
 		// removes all connections except 'event=stopped'-requests
 
-		m_abort = true;
 		std::vector<std::shared_ptr<http_tracker_connection>> close_http_connections;
 		std::vector<std::shared_ptr<udp_tracker_connection>> close_udp_connections;
 
+		for (auto const& c : m_queued)
+		{
+			tracker_request const& req = c->tracker_req();
+			if (req.event == tracker_request::stopped && !all)
+				continue;
+
+			close_http_connections.push_back(c);
+
+#ifndef TORRENT_DISABLE_LOGGING
+			std::shared_ptr<request_callback> rc = c->requester();
+			if (rc) rc->debug_log("aborting: %s", req.url.c_str());
+#endif
+		}
 		for (auto const& c : m_http_conns)
 		{
 			tracker_request const& req = c->tracker_req();

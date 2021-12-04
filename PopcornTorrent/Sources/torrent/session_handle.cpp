@@ -71,6 +71,7 @@ namespace libtorrent {
 #if TORRENT_ABI_VERSION == 1
 	constexpr session_flags_t session_handle::start_default_features;
 #endif
+	constexpr session_flags_t session_handle::paused;
 
 	constexpr remove_flags_t session_handle::delete_files;
 	constexpr remove_flags_t session_handle::delete_partfile;
@@ -367,6 +368,11 @@ namespace {
 	{
 		TORRENT_ASSERT_PRECOND(!params.save_path.empty());
 
+		// the internal torrent object keeps and mutates state in the
+		// torrent_info object. We can't let that leak back to the client
+		if (params.ti)
+			params.ti = std::make_shared<torrent_info>(*params.ti);
+
 #if TORRENT_ABI_VERSION == 1
 		handle_backwards_compatible_resume_data(params);
 #endif
@@ -386,6 +392,11 @@ namespace {
 	torrent_handle session_handle::add_torrent(add_torrent_params&& params, error_code& ec)
 	{
 		TORRENT_ASSERT_PRECOND(!params.save_path.empty());
+
+		// the internal torrent object keeps and mutates state in the
+		// torrent_info object. We can't let that leak back to the client
+		if (params.ti)
+			params.ti = std::make_shared<torrent_info>(*params.ti);
 
 		ec.clear();
 #if TORRENT_ABI_VERSION == 1
@@ -408,6 +419,11 @@ namespace {
 	void session_handle::async_add_torrent(add_torrent_params&& params)
 	{
 		TORRENT_ASSERT_PRECOND(!params.save_path.empty());
+
+		// the internal torrent object keeps and mutates state in the
+		// torrent_info object. We can't let that leak back to the client
+		if (params.ti)
+			params.ti = std::make_shared<torrent_info>(*params.ti);
 
 		// we cannot capture a unique_ptr into a lambda in c++11, so we use a raw
 		// pointer for now. async_call uses a lambda expression to post the call
@@ -433,7 +449,7 @@ namespace {
 		, std::string const& save_path
 		, entry const& resume_data
 		, storage_mode_t storage_mode
-		, bool paused
+		, bool add_paused
 		, storage_constructor_type sc)
 	{
 		add_torrent_params p(std::move(sc));
@@ -444,7 +460,7 @@ namespace {
 			bencode(std::back_inserter(p.resume_data), resume_data);
 		}
 		p.storage_mode = storage_mode;
-		if (paused) p.flags |= add_torrent_params::flag_paused;
+		if (add_paused) p.flags |= add_torrent_params::flag_paused;
 		else p.flags &= ~add_torrent_params::flag_paused;
 		return add_torrent(p);
 	}
@@ -456,7 +472,7 @@ namespace {
 		, std::string const& save_path
 		, entry const& resume_data
 		, storage_mode_t storage_mode
-		, bool paused
+		, bool add_paused
 		, storage_constructor_type sc
 		, void* userdata)
 	{
@@ -468,7 +484,7 @@ namespace {
 		p.save_path = save_path;
 		p.storage_mode = storage_mode;
 
-		if (paused) p.flags |= add_torrent_params::flag_paused;
+		if (add_paused) p.flags |= add_torrent_params::flag_paused;
 		else p.flags &= ~add_torrent_params::flag_paused;
 
 		p.userdata = userdata;
@@ -1182,14 +1198,14 @@ namespace {
 		alert_category_t m = {};
 		switch (s)
 		{
-			case alert::debug: m = alert::all_categories; break;
-			case alert::info: m = alert::all_categories & ~(alert::debug_notification
-				| alert::progress_notification | alert::dht_notification); break;
-			case alert::warning: m = alert::all_categories & ~(alert::debug_notification
-				| alert::status_notification | alert::progress_notification
-				| alert::dht_notification); break;
-			case alert::critical: m = alert::error_notification | alert::storage_notification; break;
-			case alert::fatal: m = alert::error_notification; break;
+			case alert::debug: m = alert_category::all; break;
+			case alert::info: m = alert_category::all & ~(alert::debug_notification
+				| alert::progress_notification | alert_category::dht); break;
+			case alert::warning: m = alert_category::all & ~(alert::debug_notification
+				| alert_category::status | alert::progress_notification
+				| alert_category::dht); break;
+			case alert::critical: m = alert_category::error | alert_category::storage; break;
+			case alert::fatal: m = alert_category::error; break;
 			case alert::none: m = {}; break;
 		}
 

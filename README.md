@@ -11,3 +11,9 @@ Torrent client for tvOS / iOS / macOS implemented with `libtorrent`.
 ## Compile a new version
 
 1. Open `Package.swift` with Xcode and build
+
+
+## Dependecies
+
+- boost: Version 1.77.0 (https://www.boost.org/users/download/)
+- libtorrent: Version 1.2.14 (https://github.com/arvidn/libtorrent/tags)

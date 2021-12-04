@@ -87,7 +87,7 @@ BOOST_HANA_NAMESPACE_BEGIN namespace experimental {
         }
     };
 
-    constexpr print_t print{};
+    BOOST_HANA_INLINE_VARIABLE constexpr print_t print{};
 #endif
 
     // Define the `Printable` concept
@@ -98,7 +98,7 @@ BOOST_HANA_NAMESPACE_BEGIN namespace experimental {
     };
 
     namespace print_detail {
-        std::string strip_type_junk(std::string const& str) {
+        inline std::string strip_type_junk(std::string const& str) {
             return std::regex_replace(str, std::regex("(?:struct )?([a-z_]+::)*([a-z_]*)_t<((?:struct )?[a-z:<>_]*)>"), "$2<$3>");
         }
     }

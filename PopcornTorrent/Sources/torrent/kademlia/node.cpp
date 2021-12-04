@@ -85,7 +85,9 @@ node_id calculate_node_id(node_id const& nid, aux::listen_socket_handle const& s
 	// generating an ID based on 0.0.0.0 would be terrible. random is better
 	if (external_address.is_unspecified())
 	{
-		return generate_random_id();
+		return nid.is_all_zeros()
+			? generate_random_id()
+			: nid;
 	}
 
 	if (nid.is_all_zeros() || !verify_id(nid, external_address))
@@ -126,8 +128,8 @@ node::node(aux::listen_socket_handle const& sock, socket_manager* sock_man
 	, m_counters(cnt)
 	, m_storage(storage)
 {
-	m_secret[0] = random(0xffffffff);
-	m_secret[1] = random(0xffffffff);
+	aux::crypto_random_bytes(m_secret[0]);
+	aux::crypto_random_bytes(m_secret[1]);
 }
 
 node::~node() = default;
@@ -177,7 +179,7 @@ bool node::verify_token(string_view token, sha1_hash const& info_hash
 	std::string const address = addr.address().to_string(ec);
 	if (ec) return false;
 	h1.update(address);
-	h1.update(reinterpret_cast<char const*>(&m_secret[0]), sizeof(m_secret[0]));
+	h1.update(m_secret[0]);
 	h1.update(info_hash);
 
 	sha1_hash h = h1.final();
@@ -186,7 +188,7 @@ bool node::verify_token(string_view token, sha1_hash const& info_hash
 
 	hasher h2;
 	h2.update(address);
-	h2.update(reinterpret_cast<char const*>(&m_secret[1]), sizeof(m_secret[1]));
+	h2.update(m_secret[1]);
 	h2.update(info_hash);
 	h = h2.final();
 	return std::equal(token.begin(), token.end(), reinterpret_cast<char*>(&h[0]));
@@ -202,7 +204,7 @@ std::string node::generate_token(udp::endpoint const& addr
 	std::string const address = addr.address().to_string(ec);
 	TORRENT_ASSERT(!ec);
 	h.update(address);
-	h.update(reinterpret_cast<char*>(&m_secret[0]), sizeof(m_secret[0]));
+	h.update(m_secret[0]);
 	h.update(info_hash);
 
 	sha1_hash const hash = h.final();
@@ -247,7 +249,7 @@ int node::bucket_size(int bucket)
 void node::new_write_key()
 {
 	m_secret[1] = m_secret[0];
-	m_secret[0] = random(0xffffffff);
+	aux::crypto_random_bytes(m_secret[0]);
 }
 
 void node::unreachable(udp::endpoint const& ep)
@@ -269,32 +271,37 @@ void node::incoming(aux::listen_socket_handle const& s, msg const& m)
 		return;
 	}
 
-	const char y = *(y_ent.string_ptr());
+	char const y = *(y_ent.string_ptr());
 
-	bdecode_node ext_ip = m.message.dict_find_string("ip");
+	// we can only ascribe the external IP this node is saying we have to the
+	// listen socket the packet was received on
+	if (s == m_sock)
+	{
+		bdecode_node ext_ip = m.message.dict_find_string("ip");
 
-	// backwards compatibility
-	if (!ext_ip)
-	{
-		bdecode_node const r = m.message.dict_find_dict("r");
-		if (r)
-			ext_ip = r.dict_find_string("ip");
-	}
+		// backwards compatibility
+		if (!ext_ip)
+		{
+			bdecode_node const r = m.message.dict_find_dict("r");
+			if (r)
+				ext_ip = r.dict_find_string("ip");
+		}
 
-	if (ext_ip && ext_ip.string_length() >= int(detail::address_size(udp::v6())))
-	{
-		// this node claims we use the wrong node-ID!
-		char const* ptr = ext_ip.string_ptr();
-		if (m_observer != nullptr)
-			m_observer->set_external_address(m_sock, detail::read_v6_address(ptr)
-				, m.addr.address());
-	}
-	else if (ext_ip && ext_ip.string_length() >= int(detail::address_size(udp::v4())))
-	{
-		char const* ptr = ext_ip.string_ptr();
-		if (m_observer != nullptr)
-			m_observer->set_external_address(m_sock, detail::read_v4_address(ptr)
-				, m.addr.address());
+		if (ext_ip && ext_ip.string_length() >= int(detail::address_size(udp::v6())))
+		{
+			// this node claims we use the wrong node-ID!
+			char const* ptr = ext_ip.string_ptr();
+			if (m_observer != nullptr)
+				m_observer->set_external_address(m_sock, detail::read_v6_address(ptr)
+					, m.addr.address());
+		}
+		else if (ext_ip && ext_ip.string_length() >= int(detail::address_size(udp::v4())))
+		{
+			char const* ptr = ext_ip.string_ptr();
+			if (m_observer != nullptr)
+				m_observer->set_external_address(m_sock, detail::read_v4_address(ptr)
+					, m.addr.address());
+		}
 	}
 
 	switch (y)
@@ -312,8 +319,9 @@ void node::incoming(aux::listen_socket_handle const& s, msg const& m)
 			// responds to 'query' messages that it receives.
 			if (m_settings.read_only) break;
 
-			// only respond to requests if they're addressed to this node
-			if (s != m_sock) break;
+			// ignore packets arriving on a different interface than the one we're
+			// associated with
+			if (s != m_sock) return;
 
 			if (!m_sock_man->has_quota())
 			{

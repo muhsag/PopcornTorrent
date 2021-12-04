@@ -40,12 +40,14 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/debug.hpp"
 #include "libtorrent/span.hpp"
 #include "libtorrent/flags.hpp"
+#include "libtorrent/aux_/listen_socket_handle.hpp"
 
 #include <array>
 #include <memory>
 
 namespace libtorrent {
 
+	class alert_manager;
 	struct socks5;
 
 	using udp_send_flags_t = flags::bitfield_flag<std::uint8_t, struct udp_send_flags_tag>;
@@ -53,7 +55,7 @@ namespace libtorrent {
 	class TORRENT_EXTRA_EXPORT udp_socket : single_threaded
 	{
 	public:
-		explicit udp_socket(io_service& ios);
+		explicit udp_socket(io_service& ios, aux::listen_socket_handle ls);
 
 		static constexpr udp_send_flags_t peer_connection = 0_bit;
 		static constexpr udp_send_flags_t tracker_connection = 1_bit;
@@ -95,7 +97,7 @@ namespace libtorrent {
 		void close();
 		int local_port() const { return m_bind_port; }
 
-		void set_proxy_settings(aux::proxy_settings const& ps);
+		void set_proxy_settings(aux::proxy_settings const& ps, alert_manager& alerts);
 		aux::proxy_settings const& get_proxy_settings() { return m_proxy_settings; }
 
 		bool is_closed() const { return m_abort; }
@@ -124,11 +126,17 @@ namespace libtorrent {
 			m_socket.set_option(opt, ec);
 		}
 
+#ifdef TCP_NOTSENT_LOWAT
+		void set_option(tcp_notsent_lowat const&, error_code&) {}
+#endif
+
 		template <class SocketOption>
 		void get_option(SocketOption& opt, error_code& ec)
 		{
 			m_socket.get_option(opt, ec);
 		}
+
+		bool active_socks5() const;
 
 	private:
 
@@ -144,6 +152,7 @@ namespace libtorrent {
 
 		using receive_buffer = std::array<char, 1500>;
 		std::unique_ptr<receive_buffer> m_buf;
+		aux::listen_socket_handle m_listen_socket;
 
 		std::uint16_t m_bind_port;
 

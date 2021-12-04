@@ -188,25 +188,43 @@ namespace {
 		native_path_string f = convert_to_native_path_string(inf);
 #ifdef TORRENT_WINDOWS
 
-		TORRENT_UNUSED(flags);
-
-		// in order to open a directory, we need the FILE_FLAG_BACKUP_SEMANTICS
-		HANDLE h = CreateFileW(f.c_str(), 0, FILE_SHARE_DELETE | FILE_SHARE_READ
-			| FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-		if (h == INVALID_HANDLE_VALUE)
+		WIN32_FILE_ATTRIBUTE_DATA data;
+		if (!GetFileAttributesExW(f.c_str(), GetFileExInfoStandard, &data))
 		{
 			ec.assign(GetLastError(), system_category());
 			TORRENT_ASSERT(ec);
 			return;
 		}
 
-		BY_HANDLE_FILE_INFORMATION data;
-		if (!GetFileInformationByHandle(h, &data))
+		// Fallback to GetFileInformationByHandle for symlinks
+		if (!(flags & dont_follow_links) && (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
 		{
-			ec.assign(GetLastError(), system_category());
-			TORRENT_ASSERT(ec);
+			// in order to open a directory, we need the FILE_FLAG_BACKUP_SEMANTICS
+			HANDLE h = CreateFileW(f.c_str(), 0, FILE_SHARE_DELETE | FILE_SHARE_READ
+				| FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+			if (h == INVALID_HANDLE_VALUE)
+			{
+				ec.assign(GetLastError(), system_category());
+				TORRENT_ASSERT(ec);
+				return;
+			}
+
+			BY_HANDLE_FILE_INFORMATION handle_data;
+			if (!GetFileInformationByHandle(h, &handle_data))
+			{
+				ec.assign(GetLastError(), system_category());
+				TORRENT_ASSERT(ec);
+				CloseHandle(h);
+				return;
+			}
 			CloseHandle(h);
-			return;
+
+			data.dwFileAttributes = handle_data.dwFileAttributes;
+			data.ftCreationTime = handle_data.ftCreationTime;
+			data.ftLastAccessTime = handle_data.ftLastAccessTime;
+			data.ftLastWriteTime = handle_data.ftLastWriteTime;
+			data.nFileSizeHigh = handle_data.nFileSizeHigh;
+			data.nFileSizeLow = handle_data.nFileSizeLow;
 		}
 
 		s->file_size = (std::uint64_t(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
@@ -218,7 +236,6 @@ namespace {
 			? file_status::directory
 			: (data.dwFileAttributes & FILE_ATTRIBUTE_DEVICE)
 			? file_status::character_special : file_status::regular_file;
-		CloseHandle(h);
 #else
 
 		// posix version
@@ -324,10 +341,8 @@ namespace {
 			return;
 		}
 		// something failed. Does the filesystem not support hard links?
-		// TODO: 3 find out what error code is reported when the filesystem
-		// does not support hard links.
 		DWORD const error = GetLastError();
-		if (error != ERROR_NOT_SUPPORTED && error != ERROR_ACCESS_DENIED)
+		if (error != ERROR_INVALID_FUNCTION)
 		{
 			// it's possible CreateHardLink will copy the file internally too,
 			// if the filesystem does not support it.
@@ -336,7 +351,6 @@ namespace {
 		}
 
 		// fall back to making a copy
-
 #else
 		// assume posix's link() function exists
 		int ret = ::link(n_exist.c_str(), n_link.c_str());
@@ -932,7 +946,8 @@ namespace {
 	std::string complete(string_view f)
 	{
 		if (is_complete(f)) return f.to_string();
-		if (f == ".") return current_working_directory();
+		auto parts = lsplit_path(f);
+		if (parts.first == ".") f = parts.second;
 		return combine_path(current_working_directory(), f);
 	}
 

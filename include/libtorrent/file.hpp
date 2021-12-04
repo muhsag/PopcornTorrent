@@ -99,7 +99,6 @@ namespace libtorrent {
 	private:
 #ifdef TORRENT_WINDOWS
 		HANDLE m_handle;
-		int m_inode;
 		WIN32_FIND_DATAW m_fd;
 #else
 		DIR* m_handle;
@@ -168,6 +167,8 @@ namespace libtorrent {
 	struct TORRENT_EXTRA_EXPORT file : boost::noncopyable
 	{
 		file();
+		file(file&&) noexcept;
+		file& operator=(file&&);
 		file(std::string const& p, open_mode_t m, error_code& ec);
 		~file();
 

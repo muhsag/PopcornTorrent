@@ -109,6 +109,9 @@ namespace libtorrent {
 
 		for (int i = 1; i < words + 1; ++i)
 		{
+#if defined __GNUC__ || defined __clang__
+			ret += __builtin_popcountl(m_buf[i]);
+#else
 			std::uint32_t const v = m_buf[i];
 			// from:
 			// http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
@@ -122,6 +125,7 @@ namespace libtorrent {
 			c = ((c >> S[4]) + c) & B[4];
 			ret += c;
 			TORRENT_ASSERT(ret <= size());
+#endif
 		}
 
 		TORRENT_ASSERT(ret <= size());
@@ -144,14 +148,14 @@ namespace libtorrent {
 			if (old_size_words && b) buf()[old_size_words - 1] |= aux::host_to_network(0xffffffff >> b);
 			if (old_size_words < new_size_words)
 				std::memset(buf() + old_size_words, 0xff
-					, std::size_t((new_size_words - old_size_words) * 4));
+					, static_cast<std::size_t>(new_size_words - old_size_words) * 4);
 			clear_trailing_bits();
 		}
 		else
 		{
 			if (old_size_words < new_size_words)
 				std::memset(buf() + old_size_words, 0x00
-					, std::size_t((new_size_words - old_size_words) * 4));
+					, static_cast<std::size_t>(new_size_words - old_size_words) * 4);
 		}
 		TORRENT_ASSERT(size() == bits);
 	}

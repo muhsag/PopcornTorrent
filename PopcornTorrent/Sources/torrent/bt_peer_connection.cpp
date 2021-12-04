@@ -298,9 +298,15 @@ namespace {
 		// will send their bitfield when the handshake
 		// is done
 		std::shared_ptr<torrent> t = associated_torrent().lock();
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		if (!t->share_mode())
+#endif
 		{
-			bool const upload_only_enabled = t->is_upload_only() && !t->super_seeding();
+			bool const upload_only_enabled = t->is_upload_only()
+#ifndef TORRENT_DISABLE_SUPERSEEDING
+				&& !t->super_seeding()
+#endif
+				;
 			send_upload_only(upload_only_enabled);
 		}
 
@@ -460,7 +466,9 @@ namespace {
 
 	bool bt_peer_connection::in_handshake() const
 	{
-		return !m_sent_handshake;
+		// this returns true until we have received a handshake
+		// and until we have send our handshake
+		return !m_sent_handshake || m_state < state_t::read_packet_size;
 	}
 
 #if !defined TORRENT_DISABLE_ENCRYPTION
@@ -544,9 +552,7 @@ namespace {
 		if (should_log(peer_log_alert::info))
 		{
 			peer_log(peer_log_alert::info, "ENCRYPTION"
-				, "writing synchash %s secret: %s"
-				, aux::to_hex(sync_hash).c_str()
-				, aux::to_hex(secret).c_str());
+				, "writing synchash");
 		}
 #endif
 
@@ -1114,7 +1120,7 @@ namespace {
 //				, p.piece, p.start, p.length);
 #endif
 
-		if (recv_pos - received < header_size && recv_pos >= header_size)
+		if (recv_pos - received < header_size)
 		{
 			// call this once, the first time the entire header
 			// has been received
@@ -1228,7 +1234,7 @@ namespace {
 			m_supports_dht_port = true;
 			// if we're done with the handshake, respond right away, otherwise
 			// we'll send the DHT port later
-			if (m_sent_handshake)
+			if (m_sent_bitfield)
 				write_dht_port();
 		}
 	}
@@ -1604,6 +1610,7 @@ namespace {
 			return;
 		}
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		if (extended_id == share_mode_msg)
 		{
 			if (!m_recv_buffer.packet_finished()) return;
@@ -1623,6 +1630,7 @@ namespace {
 			set_share_mode(sm);
 			return;
 		}
+#endif // TORRENT_DISABLE_SHARE_MODE
 
 		if (extended_id == holepunch_msg)
 		{
@@ -1739,7 +1747,12 @@ namespace {
 		if (last_seen_complete >= 0) set_last_seen_complete(last_seen_complete);
 
 		auto const client_info = root.dict_find_string_value("v");
-		if (!client_info.empty()) m_client_version = client_info.to_string();
+		if (!client_info.empty())
+		{
+			m_client_version = client_info.to_string();
+			// the client name is supposed to be UTF-8
+			verify_encoding(m_client_version);
+		}
 
 		int const reqq = int(root.dict_find_int_value("reqq"));
 		if (reqq > 0) max_out_request_queue(reqq);
@@ -1747,9 +1760,11 @@ namespace {
 		if (root.dict_find_int_value("upload_only", 0))
 			set_upload_only(true);
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		if (m_settings.get_bool(settings_pack::support_share_mode)
 			&& root.dict_find_int_value("share_mode", 0))
 			set_share_mode(true);
+#endif
 
 		auto const myip = root.dict_find_string_value("yourip");
 		if (!myip.empty())
@@ -1782,7 +1797,10 @@ namespace {
 		// disconnect it
 		if (t->is_finished() && upload_only()
 			&& m_settings.get_bool(settings_pack::close_redundant_connections)
-			&& !t->share_mode())
+#ifndef TORRENT_DISABLE_SHARE_MODE
+			&& !t->share_mode()
+#endif
+			)
 			disconnect(errors::upload_upload_connection, operation_t::bittorrent);
 
 		stats_counters().inc_stats_counter(counters::num_incoming_ext_handshake);
@@ -1884,7 +1902,7 @@ namespace {
 	{
 		INVARIANT_CHECK;
 
-#if TORRENT_USE_ASSERTS
+#if TORRENT_USE_ASSERTS && !defined TORRENT_DISABLE_SHARE_MODE
 		std::shared_ptr<torrent> t = associated_torrent().lock();
 		TORRENT_ASSERT(!t->share_mode());
 #endif
@@ -1905,6 +1923,7 @@ namespace {
 		stats_counters().inc_stats_counter(counters::num_outgoing_extended);
 	}
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 	void bt_peer_connection::write_share_mode()
 	{
 		INVARIANT_CHECK;
@@ -1920,6 +1939,7 @@ namespace {
 
 		stats_counters().inc_stats_counter(counters::num_outgoing_extended);
 	}
+#endif
 
 	void bt_peer_connection::write_keepalive()
 	{
@@ -1968,6 +1988,7 @@ namespace {
 		TORRENT_ASSERT(m_sent_handshake);
 		TORRENT_ASSERT(t->valid_metadata());
 
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 		if (t->super_seeding())
 		{
 #ifndef TORRENT_DISABLE_LOGGING
@@ -1986,7 +2007,9 @@ namespace {
 			if (piece >= piece_index_t(0)) superseed_piece(piece_index_t(-1), piece);
 			return;
 		}
-		else if (m_supports_fast && t->is_seed())
+		else
+#endif
+			if (m_supports_fast && t->is_seed())
 		{
 			write_have_all();
 			return;
@@ -2045,10 +2068,12 @@ namespace {
 			}
 		}
 
+#ifndef TORRENT_DISABLE_PREDICTIVE_PIECES
 		// add predictive pieces to the bitfield as well, since we won't
 		// announce them again
 		for (piece_index_t const p : t->predictive_pieces())
 			msg[5 + static_cast<int>(p) / CHAR_BIT] |= (char_top_bit >> (static_cast<int>(p) & char_bit_mask));
+#endif
 
 #ifndef TORRENT_DISABLE_LOGGING
 		if (should_log(peer_log_alert::outgoing_message))
@@ -2116,8 +2141,10 @@ namespace {
 
 		m["upload_only"] = upload_only_msg;
 		m["ut_holepunch"] = holepunch_msg;
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		if (m_settings.get_bool(settings_pack::support_share_mode))
 			m["share_mode"] = share_mode_msg;
+#endif
 		m["lt_donthave"] = dont_have_msg;
 
 		int complete_ago = -1;
@@ -2134,16 +2161,23 @@ namespace {
 		// upload-only. If we do, we may be disconnected before we receive the
 		// metadata.
 		if (t->is_upload_only()
+#ifndef TORRENT_DISABLE_SHARE_MODE
 			&& !t->share_mode()
+#endif
 			&& t->valid_metadata()
-			&& !t->super_seeding())
+#ifndef TORRENT_DISABLE_SUPERSEEDING
+			&& !t->super_seeding()
+#endif
+			)
 		{
 			handshake["upload_only"] = 1;
 		}
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		if (m_settings.get_bool(settings_pack::support_share_mode)
 			&& t->share_mode())
 			handshake["share_mode"] = 1;
+#endif
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
 		// loop backwards, to make the first extension be the last
@@ -3152,29 +3186,26 @@ namespace {
 			peer_id pid;
 			std::copy(recv_buffer.begin(), recv_buffer.begin() + 20, pid.data());
 
-			if (t->settings().get_bool(settings_pack::allow_multiple_connections_per_ip))
+			// now, let's see if this connection should be closed
+			peer_connection* p = t->find_peer(pid);
+			if (p)
 			{
-				// now, let's see if this connection should be closed
-				peer_connection* p = t->find_peer(pid);
-				if (p)
+				TORRENT_ASSERT(p->pid() == pid);
+				// we found another connection with the same peer-id
+				// which connection should be closed in order to be
+				// sure that the other end closes the same connection?
+				// the peer with greatest peer-id is the one allowed to
+				// initiate connections. So, if our peer-id is greater than
+				// the others, we should close the incoming connection,
+				// if not, we should close the outgoing one.
+				if ((pid < m_our_peer_id) == is_outgoing())
 				{
-					TORRENT_ASSERT(p->pid() == pid);
-					// we found another connection with the same peer-id
-					// which connection should be closed in order to be
-					// sure that the other end closes the same connection?
-					// the peer with greatest peer-id is the one allowed to
-					// initiate connections. So, if our peer-id is greater than
-					// the others, we should close the incoming connection,
-					// if not, we should close the outgoing one.
-					if ((pid < m_our_peer_id) == is_outgoing())
-					{
-						p->disconnect(errors::duplicate_peer_id, operation_t::bittorrent);
-					}
-					else
-					{
-						disconnect(errors::duplicate_peer_id, operation_t::bittorrent);
-						return;
-					}
+					p->disconnect(errors::duplicate_peer_id, operation_t::bittorrent);
+				}
+				else
+				{
+					disconnect(errors::duplicate_peer_id, operation_t::bittorrent);
+					return;
 				}
 			}
 

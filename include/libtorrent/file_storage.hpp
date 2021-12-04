@@ -66,7 +66,7 @@ namespace libtorrent {
 		file_entry(file_entry const&) = default;
 		file_entry& operator=(file_entry const&) & = default;
 		file_entry(file_entry&&) noexcept = default;
-		file_entry& operator=(file_entry&&) & noexcept = default;
+		file_entry& operator=(file_entry&&) & = default;
 
 #if defined __GNUC__
 #pragma GCC diagnostic pop
@@ -220,7 +220,7 @@ namespace libtorrent {
 		file_storage(file_storage const&);
 		file_storage& operator=(file_storage const&);
 		file_storage(file_storage&&) noexcept;
-		file_storage& operator=(file_storage&&) = default;
+		file_storage& operator=(file_storage&&);
 
 		// returns true if the piece length has been initialized
 		// on the file_storage. This is typically taken as a proxy
@@ -229,6 +229,7 @@ namespace libtorrent {
 		bool is_valid() const { return m_piece_length > 0; }
 
 #if TORRENT_ABI_VERSION == 1
+		using flags_t = file_flags_t;
 		static constexpr file_flags_t TORRENT_DEPRECATED_MEMBER pad_file = 0_bit;
 		static constexpr file_flags_t TORRENT_DEPRECATED_MEMBER attribute_hidden = 1_bit;
 		static constexpr file_flags_t TORRENT_DEPRECATED_MEMBER attribute_executable = 2_bit;
@@ -309,6 +310,7 @@ namespace libtorrent {
 		// all wstring APIs are deprecated since 0.16.11
 		// instead, use the wchar -> utf8 conversion functions
 		// and pass in utf8 strings
+#if defined TORRENT_WINDOWS
 		TORRENT_DEPRECATED
 		void add_file(std::wstring const& p, std::int64_t size
 			, file_flags_t flags = {}
@@ -319,6 +321,8 @@ namespace libtorrent {
 		void set_name(std::wstring const& n);
 
 		void rename_file_deprecated(file_index_t index, std::wstring const& new_filename);
+#endif
+
 		// all functions depending on internal_file_entry
 		// were deprecated in 1.0. Use the variants that take an
 		// index instead
@@ -559,6 +563,10 @@ namespace libtorrent {
 		// other files or directories inside this storage. Any invalid symlinks
 		// are updated to point to themselves.
 		void sanitize_symlinks();
+
+		// internal
+		// this is an optimization for create_torrent
+		std::string const& internal_symlink(file_index_t index) const;
 
 	private:
 

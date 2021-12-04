@@ -126,8 +126,12 @@ namespace libtorrent {
 
 	std::string torrent_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		if (!handle.is_valid()) return " - ";
 		return torrent_name();
+#endif
 	}
 
 	peer_alert::peer_alert(aux::stack_allocator& alloc
@@ -144,8 +148,12 @@ namespace libtorrent {
 
 	std::string peer_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " peer [ " + print_endpoint(endpoint)
 			+ " client: " + aux::identify_client_impl(pid) + " ]";
+#endif
 	}
 
 	tracker_alert::tracker_alert(aux::stack_allocator& alloc
@@ -165,8 +173,12 @@ namespace libtorrent {
 
 	std::string tracker_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " (" + tracker_url() + ")"
 			+ "[" + print_endpoint(local_endpoint) + "]";
+#endif
 	}
 
 	read_piece_alert::read_piece_alert(aux::stack_allocator& alloc
@@ -191,6 +203,9 @@ namespace libtorrent {
 
 	std::string read_piece_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[200];
 		if (error)
 		{
@@ -204,6 +219,7 @@ namespace libtorrent {
 				, torrent_alert::message().c_str() , static_cast<int>(piece));
 		}
 		return msg;
+#endif
 	}
 
 	file_completed_alert::file_completed_alert(aux::stack_allocator& alloc
@@ -215,12 +231,16 @@ namespace libtorrent {
 
 	std::string file_completed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		std::string ret { torrent_alert::message() };
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), ": file %d finished downloading"
 			, static_cast<int>(index));
 		ret.append(msg);
 		return ret;
+#endif
 	}
 
 	file_renamed_alert::file_renamed_alert(aux::stack_allocator& alloc
@@ -240,6 +260,9 @@ namespace libtorrent {
 
 	std::string file_renamed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		std::string ret { torrent_alert::message() };
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), ": file %d renamed to "
@@ -247,6 +270,7 @@ namespace libtorrent {
 		ret.append(msg);
 		ret.append(new_name());
 		return ret;
+#endif
 	}
 
 	file_rename_failed_alert::file_rename_failed_alert(aux::stack_allocator& alloc
@@ -260,6 +284,9 @@ namespace libtorrent {
 
 	std::string file_rename_failed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		std::string ret { torrent_alert::message() };
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), ": failed to rename file %d: "
@@ -267,6 +294,7 @@ namespace libtorrent {
 		ret.append(msg);
 		ret.append(convert_from_native(error.message()));
 		return ret;
+#endif
 	}
 
 	performance_alert::performance_alert(aux::stack_allocator& alloc
@@ -276,8 +304,12 @@ namespace libtorrent {
 		, warning_code(w)
 	{}
 
-	std::string performance_alert::message() const
+	char const* performance_warning_str(performance_alert::performance_warning_t i)
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		TORRENT_UNUSED(i);
+		return "";
+#else
 		static char const* const warning_str[] =
 		{
 			"max outstanding disk writes reached",
@@ -286,15 +318,23 @@ namespace libtorrent {
 			"download limit too low (upload rate will suffer)",
 			"send buffer watermark too low (upload rate will suffer)",
 			"too many optimistic unchoke slots",
-			"using bittyrant unchoker with no upload rate limit set",
 			"the disk queue limit is too high compared to the cache size. The disk queue eats into the cache size",
 			"outstanding AIO operations limit reached",
+			"using bittyrant unchoker with no upload rate limit set",
 			"too few ports allowed for outgoing connections",
 			"too few file descriptors are allowed for this process. connection limit lowered"
 		};
 
+		TORRENT_ASSERT(i >= 0);
+		TORRENT_ASSERT(i < std::end(warning_str) - std::begin(warning_str));
+		return warning_str[i];
+#endif
+	}
+
+	std::string performance_alert::message() const
+	{
 		return torrent_alert::message() + ": performance warning: "
-			+ warning_str[warning_code];
+			+ performance_warning_str(warning_code);
 	}
 
 	state_changed_alert::state_changed_alert(aux::stack_allocator& alloc
@@ -308,6 +348,9 @@ namespace libtorrent {
 
 	std::string state_changed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		static char const* const state_str[] =
 			{"checking (q)", "checking", "dl metadata"
 			, "downloading", "finished", "seeding", "allocating"
@@ -315,6 +358,7 @@ namespace libtorrent {
 
 		return torrent_alert::message() + ": state changed to: "
 			+ state_str[state];
+#endif
 	}
 
 	tracker_error_alert::tracker_error_alert(aux::stack_allocator& alloc
@@ -339,12 +383,16 @@ namespace libtorrent {
 
 	std::string tracker_error_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[400];
 		std::snprintf(ret, sizeof(ret), "%s %s \"%s\" (%d)"
 			, tracker_alert::message().c_str()
 			, convert_from_native(error.message()).c_str(), error_message()
 			, times_in_row);
 		return ret;
+#endif
 	}
 
 	tracker_warning_alert::tracker_warning_alert(aux::stack_allocator& alloc
@@ -366,7 +414,11 @@ namespace libtorrent {
 
 	std::string tracker_warning_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return tracker_alert::message() + " warning: " + warning_message();
+#endif
 	}
 
 	scrape_reply_alert::scrape_reply_alert(aux::stack_allocator& alloc
@@ -381,10 +433,14 @@ namespace libtorrent {
 
 	std::string scrape_reply_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[400];
 		std::snprintf(ret, sizeof(ret), "%s scrape reply: %d %d"
 			, tracker_alert::message().c_str(), incomplete, complete);
 		return ret;
+#endif
 	}
 
 	scrape_failed_alert::scrape_failed_alert(aux::stack_allocator& alloc
@@ -421,7 +477,11 @@ namespace libtorrent {
 
 	std::string scrape_failed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return tracker_alert::message() + " scrape failed: " + error_message();
+#endif
 	}
 
 	tracker_reply_alert::tracker_reply_alert(aux::stack_allocator& alloc
@@ -435,10 +495,14 @@ namespace libtorrent {
 
 	std::string tracker_reply_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[400];
 		std::snprintf(ret, sizeof(ret), "%s received peers: %d"
 			, tracker_alert::message().c_str(), num_peers);
 		return ret;
+#endif
 	}
 
 	dht_reply_alert::dht_reply_alert(aux::stack_allocator& alloc
@@ -450,10 +514,14 @@ namespace libtorrent {
 
 	std::string dht_reply_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[400];
 		std::snprintf(ret, sizeof(ret), "%s received DHT peers: %d"
 			, tracker_alert::message().c_str(), num_peers);
 		return ret;
+#endif
 	}
 
 	tracker_announce_alert::tracker_announce_alert(aux::stack_allocator& alloc
@@ -466,9 +534,13 @@ namespace libtorrent {
 
 	std::string tracker_announce_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		static const char* const event_str[] = {"none", "completed", "started", "stopped", "paused"};
 		TORRENT_ASSERT_VAL(event < int(sizeof(event_str) / sizeof(event_str[0])), event);
 		return tracker_alert::message() + " sending announce (" + event_str[event] + ")";
+#endif
 	}
 
 	hash_failed_alert::hash_failed_alert(
@@ -483,10 +555,14 @@ namespace libtorrent {
 
 	std::string hash_failed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[400];
 		std::snprintf(ret, sizeof(ret), "%s hash for piece %d failed"
 			, torrent_alert::message().c_str(), static_cast<int>(piece_index));
 		return ret;
+#endif
 	}
 
 	peer_ban_alert::peer_ban_alert(aux::stack_allocator& alloc
@@ -497,7 +573,11 @@ namespace libtorrent {
 
 	std::string peer_ban_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return peer_alert::message() + " banned peer";
+#endif
 	}
 
 	peer_unsnubbed_alert::peer_unsnubbed_alert(aux::stack_allocator& alloc
@@ -508,7 +588,11 @@ namespace libtorrent {
 
 	std::string peer_unsnubbed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return peer_alert::message() + " peer unsnubbed";
+#endif
 	}
 
 	peer_snubbed_alert::peer_snubbed_alert(aux::stack_allocator& alloc
@@ -519,7 +603,11 @@ namespace libtorrent {
 
 	std::string peer_snubbed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return peer_alert::message() + " peer snubbed";
+#endif
 	}
 
 	invalid_request_alert::invalid_request_alert(aux::stack_allocator& alloc
@@ -535,6 +623,9 @@ namespace libtorrent {
 
 	std::string invalid_request_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[400];
 		std::snprintf(ret, sizeof(ret), "%s peer sent an invalid piece request "
 			"(piece: %d start: %d len: %d)%s"
@@ -547,6 +638,7 @@ namespace libtorrent {
 			: !peer_interested ? ": peer is not interested"
 			: "");
 		return ret;
+#endif
 	}
 
 	torrent_finished_alert::torrent_finished_alert(aux::stack_allocator& alloc
@@ -556,7 +648,11 @@ namespace libtorrent {
 
 	std::string torrent_finished_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " torrent finished downloading";
+#endif
 	}
 
 	piece_finished_alert::piece_finished_alert(aux::stack_allocator& alloc
@@ -567,10 +663,14 @@ namespace libtorrent {
 
 	std::string piece_finished_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[200];
 		std::snprintf(ret, sizeof(ret), "%s piece: %d finished downloading"
 			, torrent_alert::message().c_str(), static_cast<int>(piece_index));
 		return ret;
+#endif
 	}
 
 	request_dropped_alert::request_dropped_alert(aux::stack_allocator& alloc, torrent_handle h
@@ -585,10 +685,14 @@ namespace libtorrent {
 
 	std::string request_dropped_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[200];
 		std::snprintf(ret, sizeof(ret), "%s peer dropped block ( piece: %d block: %d)"
-			, torrent_alert::message().c_str(), static_cast<int>(piece_index), block_index);
+			, peer_alert::message().c_str(), static_cast<int>(piece_index), block_index);
 		return ret;
+#endif
 	}
 
 	block_timeout_alert::block_timeout_alert(aux::stack_allocator& alloc, torrent_handle h
@@ -603,10 +707,14 @@ namespace libtorrent {
 
 	std::string block_timeout_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[200];
 		std::snprintf(ret, sizeof(ret), "%s peer timed out request ( piece: %d block: %d)"
-			, torrent_alert::message().c_str(), static_cast<int>(piece_index), block_index);
+			, peer_alert::message().c_str(), static_cast<int>(piece_index), block_index);
 		return ret;
+#endif
 	}
 
 	block_finished_alert::block_finished_alert(aux::stack_allocator& alloc, torrent_handle h
@@ -621,10 +729,14 @@ namespace libtorrent {
 
 	std::string block_finished_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[200];
 		std::snprintf(ret, sizeof(ret), "%s block finished downloading (piece: %d block: %d)"
-			, torrent_alert::message().c_str(), static_cast<int>(piece_index), block_index);
+			, peer_alert::message().c_str(), static_cast<int>(piece_index), block_index);
 		return ret;
+#endif
 	}
 
 	block_downloading_alert::block_downloading_alert(aux::stack_allocator& alloc, torrent_handle h
@@ -642,10 +754,14 @@ namespace libtorrent {
 
 	std::string block_downloading_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[200];
 		std::snprintf(ret, sizeof(ret), "%s requested block (piece: %d block: %d)"
-			, torrent_alert::message().c_str(), static_cast<int>(piece_index), block_index);
+			, peer_alert::message().c_str(), static_cast<int>(piece_index), block_index);
 		return ret;
+#endif
 	}
 
 	unwanted_block_alert::unwanted_block_alert(aux::stack_allocator& alloc, torrent_handle h
@@ -660,10 +776,14 @@ namespace libtorrent {
 
 	std::string unwanted_block_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[200];
 		std::snprintf(ret, sizeof(ret), "%s received block not in download queue (piece: %d block: %d)"
-			, torrent_alert::message().c_str(), static_cast<int>(piece_index), block_index);
+			, peer_alert::message().c_str(), static_cast<int>(piece_index), block_index);
 		return ret;
+#endif
 	}
 
 	storage_moved_alert::storage_moved_alert(aux::stack_allocator& alloc
@@ -677,8 +797,12 @@ namespace libtorrent {
 
 	std::string storage_moved_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " moved storage to: "
 			+ storage_path();
+#endif
 	}
 
 	char const* storage_moved_alert::storage_path() const
@@ -706,9 +830,13 @@ namespace libtorrent {
 
 	std::string storage_moved_failed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " storage move failed. "
 			+ operation_name(op) + " (" + file_path() + "): "
 			+ convert_from_native(error.message());
+#endif
 	}
 
 	torrent_deleted_alert::torrent_deleted_alert(aux::stack_allocator& alloc
@@ -719,7 +847,11 @@ namespace libtorrent {
 
 	std::string torrent_deleted_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " deleted";
+#endif
 	}
 
 	torrent_delete_failed_alert::torrent_delete_failed_alert(aux::stack_allocator& alloc
@@ -735,8 +867,12 @@ namespace libtorrent {
 
 	std::string torrent_delete_failed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " torrent deletion failed: "
 			+ convert_from_native(error.message());
+#endif
 	}
 
 	save_resume_data_alert::save_resume_data_alert(aux::stack_allocator& alloc
@@ -752,7 +888,11 @@ namespace libtorrent {
 
 	std::string save_resume_data_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " resume data generated";
+#endif
 	}
 
 	save_resume_data_failed_alert::save_resume_data_failed_alert(aux::stack_allocator& alloc
@@ -767,8 +907,12 @@ namespace libtorrent {
 
 	std::string save_resume_data_failed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " resume data was not generated: "
 			+ convert_from_native(error.message());
+#endif
 	}
 
 	torrent_paused_alert::torrent_paused_alert(aux::stack_allocator& alloc
@@ -778,7 +922,11 @@ namespace libtorrent {
 
 	std::string torrent_paused_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " paused";
+#endif
 	}
 
 	torrent_resumed_alert::torrent_resumed_alert(aux::stack_allocator& alloc
@@ -788,7 +936,11 @@ namespace libtorrent {
 
 	std::string torrent_resumed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " resumed";
+#endif
 	}
 
 	torrent_checked_alert::torrent_checked_alert(aux::stack_allocator& alloc
@@ -798,7 +950,11 @@ namespace libtorrent {
 
 	std::string torrent_checked_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " checked";
+#endif
 	}
 
 namespace {
@@ -811,6 +967,7 @@ namespace {
 		return idx;
 	}
 
+#ifndef TORRENT_DISABLE_ALERT_MSG
 	char const* sock_type_str(socket_type_t type)
 	{
 		static char const* const type_str[] =
@@ -835,6 +992,7 @@ namespace {
 		"HTTPS",
 		"SSL/uTP"
 	};
+#endif
 
 #if TORRENT_ABI_VERSION == 1
 
@@ -895,6 +1053,9 @@ namespace {
 			case o::partfile_write: return -1;
 			case o::hostname_lookup: return -1;
 			case o::symlink: return -1;
+			case o::handshake: return -1;
+			case o::sock_option: return -1;
+			case o::enum_route: return -1;
 		}
 		return -1;
 	}
@@ -985,6 +1146,9 @@ namespace {
 
 	std::string listen_failed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[300];
 		std::snprintf(ret, sizeof(ret), "listening on %s (device: %s) failed: [%s] [%s] %s"
 			, print_endpoint(address, port).c_str()
@@ -993,6 +1157,7 @@ namespace {
 			, sock_type_str(socket_type)
 			, convert_from_native(error.message()).c_str());
 		return ret;
+#endif
 	}
 
 	metadata_failed_alert::metadata_failed_alert(aux::stack_allocator& alloc
@@ -1003,7 +1168,11 @@ namespace {
 
 	std::string metadata_failed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " invalid metadata received";
+#endif
 	}
 
 	metadata_received_alert::metadata_received_alert(aux::stack_allocator& alloc
@@ -1013,7 +1182,11 @@ namespace {
 
 	std::string metadata_received_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " metadata successfully received";
+#endif
 	}
 
 	udp_error_alert::udp_error_alert(
@@ -1028,10 +1201,14 @@ namespace {
 
 	std::string udp_error_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		error_code ec;
 		return "UDP error: " + convert_from_native(error.message())
 			+ " from: " + endpoint.address().to_string(ec)
 			+ " op: " + operation_name(operation);
+#endif
 	}
 
 	external_ip_alert::external_ip_alert(aux::stack_allocator&
@@ -1041,8 +1218,12 @@ namespace {
 
 	std::string external_ip_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		error_code ec;
 		return "external IP received: " + external_address.to_string(ec);
+#endif
 	}
 
 	listen_succeeded_alert::listen_succeeded_alert(aux::stack_allocator&
@@ -1078,10 +1259,14 @@ namespace {
 
 	std::string listen_succeeded_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[200];
 		std::snprintf(ret, sizeof(ret), "successfully listening on [%s] %s"
 			, sock_type_str(socket_type), print_endpoint(address, port).c_str());
 		return ret;
+#endif
 	}
 
 	portmap_error_alert::portmap_error_alert(aux::stack_allocator&
@@ -1097,9 +1282,13 @@ namespace {
 
 	std::string portmap_error_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return std::string("could not map port using ")
 			+ nat_type_str[static_cast<int>(map_transport)]
 			+ ": " + convert_from_native(error.message());
+#endif
 	}
 
 	portmap_alert::portmap_alert(aux::stack_allocator&, port_mapping_t const i
@@ -1118,11 +1307,15 @@ namespace {
 
 	std::string portmap_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[200];
 		std::snprintf(ret, sizeof(ret), "successfully mapped port using %s. external port: %s/%d"
 			, nat_type_str[static_cast<int>(map_transport)]
 			, protocol_str[static_cast<int>(map_protocol)], external_port);
 		return ret;
+#endif
 	}
 
 	portmap_log_alert::portmap_log_alert(aux::stack_allocator& alloc
@@ -1143,11 +1336,15 @@ namespace {
 
 	std::string portmap_log_alert::message() const
 	{
-		char ret[600];
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
+		char ret[1024];
 		std::snprintf(ret, sizeof(ret), "%s: %s"
 			, nat_type_str[static_cast<int>(map_transport)]
 			, log_message());
 		return ret;
+#endif
 	}
 
 	fastresume_rejected_alert::fastresume_rejected_alert(
@@ -1170,9 +1367,13 @@ namespace {
 
 	std::string fastresume_rejected_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " fast resume rejected. "
 			+ operation_name(op) + "(" + file_path() + "): "
 			+ convert_from_native(error.message());
+#endif
 	}
 
 	char const* fastresume_rejected_alert::file_path() const
@@ -1188,6 +1389,9 @@ namespace {
 
 	std::string peer_blocked_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[600];
 		static char const* const reason_str[] =
 		{
@@ -1197,12 +1401,14 @@ namespace {
 			"privileged_ports",
 			"utp_disabled",
 			"tcp_disabled",
-			"invalid_local_interface"
+			"invalid_local_interface",
+			"ssrf_mitigation"
 		};
 
 		std::snprintf(ret, sizeof(ret), "%s: blocked peer [%s]"
 			, peer_alert::message().c_str(), reason_str[reason]);
 		return ret;
+#endif
 	}
 
 	dht_announce_alert::dht_announce_alert(aux::stack_allocator&
@@ -1215,11 +1421,15 @@ namespace {
 
 	std::string dht_announce_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		error_code ec;
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), "incoming dht announce: %s:%d (%s)"
 			, ip.to_string(ec).c_str(), port, aux::to_hex(info_hash).c_str());
 		return msg;
+#endif
 	}
 
 	dht_get_peers_alert::dht_get_peers_alert(aux::stack_allocator&
@@ -1229,9 +1439,13 @@ namespace {
 
 	std::string dht_get_peers_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), "incoming dht get_peers: %s", aux::to_hex(info_hash).c_str());
 		return msg;
+#endif
 	}
 
 namespace {
@@ -1271,6 +1485,9 @@ namespace {
 
 	std::string stats_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), "%s: [%d] %d %d %d %d %d %d"
 #if TORRENT_ABI_VERSION == 1
@@ -1292,6 +1509,7 @@ namespace {
 #endif
 			);
 		return msg;
+#endif
 	}
 
 	cache_flushed_alert::cache_flushed_alert(aux::stack_allocator& alloc
@@ -1308,6 +1526,9 @@ namespace {
 
 	std::string anonymous_mode_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[200];
 		static char const* const msgs[] = {
 			"tracker is not anonymous, set a proxy"
@@ -1316,6 +1537,7 @@ namespace {
 			, torrent_alert::message().c_str()
 			, msgs[kind], str.c_str());
 		return msg;
+#endif
 	}
 #endif // TORRENT_ABI_VERSION
 
@@ -1326,10 +1548,14 @@ namespace {
 
 	std::string lsd_peer_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), "%s: received peer from local service discovery"
 			, peer_alert::message().c_str());
 		return msg;
+#endif
 	}
 
 	trackerid_alert::trackerid_alert(
@@ -1352,7 +1578,11 @@ namespace {
 
 	std::string trackerid_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return std::string("trackerid received: ") + tracker_id();
+#endif
 	}
 
 	dht_bootstrap_alert::dht_bootstrap_alert(aux::stack_allocator&)
@@ -1360,7 +1590,11 @@ namespace {
 
 	std::string dht_bootstrap_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return "DHT bootstrap complete";
+#endif
 	}
 
 	torrent_error_alert::torrent_error_alert(
@@ -1377,6 +1611,9 @@ namespace {
 
 	std::string torrent_error_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[400];
 		if (error)
 		{
@@ -1389,6 +1626,7 @@ namespace {
 			std::snprintf(msg, sizeof(msg), " ERROR: %s", filename());
 		}
 		return torrent_alert::message() + msg;
+#endif
 	}
 
 	char const* torrent_error_alert::filename() const
@@ -1404,7 +1642,11 @@ namespace {
 
 	std::string torrent_added_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " added";
+#endif
 	}
 #endif
 
@@ -1416,7 +1658,11 @@ namespace {
 
 	std::string torrent_removed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " removed";
+#endif
 	}
 
 	torrent_need_cert_alert::torrent_need_cert_alert(aux::stack_allocator& alloc
@@ -1426,7 +1672,11 @@ namespace {
 
 	std::string torrent_need_cert_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " needs SSL certificate";
+#endif
 	}
 
 	incoming_connection_alert::incoming_connection_alert(aux::stack_allocator&, int t
@@ -1440,10 +1690,14 @@ namespace {
 
 	std::string incoming_connection_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[600];
 		std::snprintf(msg, sizeof(msg), "incoming connection from %s (%s)"
 			, print_endpoint(endpoint).c_str(), socket_type_str[socket_type]);
 		return msg;
+#endif
 	}
 
 	peer_connect_alert::peer_connect_alert(aux::stack_allocator& alloc, torrent_handle h
@@ -1454,10 +1708,14 @@ namespace {
 
 	std::string peer_connect_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[600];
 		std::snprintf(msg, sizeof(msg), "%s connecting to peer (%s)"
 			, peer_alert::message().c_str(), socket_type_str[socket_type]);
 		return msg;
+#endif
 	}
 
 	add_torrent_alert::add_torrent_alert(aux::stack_allocator& alloc, torrent_handle const& h
@@ -1469,6 +1727,9 @@ namespace {
 
 	std::string add_torrent_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[600];
 		char info_hash[41];
 		char const* torrent_name = info_hash;
@@ -1490,6 +1751,7 @@ namespace {
 			std::snprintf(msg, sizeof(msg), "added torrent: %s", torrent_name);
 		}
 		return msg;
+#endif
 	}
 
 	state_update_alert::state_update_alert(aux::stack_allocator&
@@ -1499,9 +1761,13 @@ namespace {
 
 	std::string state_update_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[600];
 		std::snprintf(msg, sizeof(msg), "state updates for %d torrents", int(status.size()));
 		return msg;
+#endif
 	}
 
 #if TORRENT_ABI_VERSION == 1
@@ -1511,15 +1777,23 @@ namespace {
 
 	std::string mmap_cache_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[600];
 		std::snprintf(msg, sizeof(msg), "mmap cache failed: (%d) %s", error.value()
 			, convert_from_native(error.message()).c_str());
 		return msg;
+#endif
 	}
 #endif
 
 	char const* operation_name(operation_t const op)
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		TORRENT_UNUSED(op);
+		return "";
+#else
 		static char const* const names[] = {
 			"unknown",
 			"bittorrent",
@@ -1560,7 +1834,10 @@ namespace {
 			"partfile_read",
 			"partfile_write",
 			"hostname_lookup",
-			"symlink"
+			"symlink",
+			"handshake",
+			"sock_option",
+			"enum_route"
 		};
 
 		int const idx = static_cast<int>(op);
@@ -1568,6 +1845,7 @@ namespace {
 			return "unknown operation";
 
 		return names[idx];
+#endif
 	}
 
 #if TORRENT_ABI_VERSION == 1
@@ -1591,12 +1869,16 @@ namespace {
 
 	std::string peer_error_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char buf[200];
 		std::snprintf(buf, sizeof(buf), "%s peer error [%s] [%s]: %s"
 			, peer_alert::message().c_str()
 			, operation_name(op), error.category().name()
 			, convert_from_native(error.message()).c_str());
 		return buf;
+#endif
 	}
 
 #if TORRENT_ABI_VERSION == 1
@@ -1609,11 +1891,15 @@ namespace {
 
 	std::string torrent_update_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), " torrent changed info-hash from: %s to %s"
 			, aux::to_hex(old_ih).c_str()
 			, aux::to_hex(new_ih).c_str());
 		return torrent_alert::message() + msg;
+#endif
 	}
 #endif
 
@@ -1634,6 +1920,9 @@ namespace {
 
 	std::string peer_disconnected_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char buf[600];
 		std::snprintf(buf, sizeof(buf), "%s disconnecting (%s) [%s] [%s]: %s (reason: %d)"
 			, peer_alert::message().c_str()
@@ -1642,6 +1931,7 @@ namespace {
 			, convert_from_native(error.message()).c_str()
 			, int(reason));
 		return buf;
+#endif
 	}
 
 	dht_error_alert::dht_error_alert(aux::stack_allocator&
@@ -1657,12 +1947,16 @@ namespace {
 
 	std::string dht_error_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[600];
 		std::snprintf(msg, sizeof(msg), "DHT error [%s] (%d) %s"
 			, operation_name(op)
 			, error.value()
 			, convert_from_native(error.message()).c_str());
 		return msg;
+#endif
 	}
 
 	dht_immutable_item_alert::dht_immutable_item_alert(aux::stack_allocator&
@@ -1672,11 +1966,15 @@ namespace {
 
 	std::string dht_immutable_item_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[1050];
 		std::snprintf(msg, sizeof(msg), "DHT immutable item %s [ %s ]"
 			, aux::to_hex(target).c_str()
 			, item.to_string().c_str());
 		return msg;
+#endif
 	}
 
 	// TODO: 2 the salt here is allocated on the heap. It would be nice to
@@ -1693,6 +1991,9 @@ namespace {
 
 	std::string dht_mutable_item_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[1050];
 		std::snprintf(msg, sizeof(msg), "DHT mutable item (key=%s salt=%s seq=%" PRId64 " %s) [ %s ]"
 			, aux::to_hex(key).c_str()
@@ -1701,6 +2002,7 @@ namespace {
 			, authoritative ? "auth" : "non-auth"
 			, item.to_string().c_str());
 		return msg;
+#endif
 	}
 
 	dht_put_alert::dht_put_alert(aux::stack_allocator&, sha1_hash const& t, int n)
@@ -1728,6 +2030,9 @@ namespace {
 
 	std::string dht_put_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[1050];
 		if (target.is_all_zeros())
 		{
@@ -1740,10 +2045,11 @@ namespace {
 			return msg;
 		}
 
-		std::snprintf(msg, sizeof(msg), "DHT put commplete (success=%d hash=%s)"
+		std::snprintf(msg, sizeof(msg), "DHT put complete (success=%d hash=%s)"
 			, num_success
 			, aux::to_hex(target).c_str());
 		return msg;
+#endif
 	}
 
 	i2p_alert::i2p_alert(aux::stack_allocator&, error_code const& ec)
@@ -1752,10 +2058,14 @@ namespace {
 
 	std::string i2p_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[600];
 		std::snprintf(msg, sizeof(msg), "i2p_error: [%s] %s"
 			, error.category().name(), convert_from_native(error.message()).c_str());
 		return msg;
+#endif
 	}
 
 	dht_outgoing_get_peers_alert::dht_outgoing_get_peers_alert(aux::stack_allocator&
@@ -1771,6 +2081,9 @@ namespace {
 
 	std::string dht_outgoing_get_peers_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[600];
 		char obf[70];
 		obf[0] = '\0';
@@ -1784,6 +2097,7 @@ namespace {
 			, obf
 			, print_endpoint(endpoint).c_str());
 		return msg;
+#endif
 	}
 
 	log_alert::log_alert(aux::stack_allocator& alloc, char const* log)
@@ -1809,7 +2123,11 @@ namespace {
 
 	std::string log_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return log_message();
+#endif
 	}
 
 	torrent_log_alert::torrent_log_alert(aux::stack_allocator& alloc, torrent_handle const& h
@@ -1832,7 +2150,11 @@ namespace {
 
 	std::string torrent_log_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + ": " + log_message();
+#endif
 	}
 
 	peer_log_alert::peer_log_alert(aux::stack_allocator& alloc
@@ -1860,10 +2182,14 @@ namespace {
 
 	std::string peer_log_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		static char const* const mode[] =
 		{ "<==", "==>", "<<<", ">>>", "***" };
-		return torrent_alert::message() + " [" + print_endpoint(endpoint) + "] "
+		return peer_alert::message() + " [" + print_endpoint(endpoint) + "] "
 			+ mode[direction] + " " + event_type + " [ " + log_message() + " ]";
+#endif
 	}
 
 	lsd_error_alert::lsd_error_alert(aux::stack_allocator&, error_code const& ec)
@@ -1873,7 +2199,11 @@ namespace {
 
 	std::string lsd_error_alert::message() const
 	{
-		return "Local Service Discovery error: " + convert_from_native(error.message());
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
+		return "Local Service Discovery startup error: " + convert_from_native(error.message());
+#endif
 	}
 
 #if TORRENT_ABI_VERSION == 1
@@ -1918,6 +2248,9 @@ namespace {
 
 	std::string session_stats_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[50];
 		auto cnt = counters();
 		std::snprintf(msg, sizeof(msg), "session stats (%d values): " , int(cnt.size()));
@@ -1930,6 +2263,7 @@ namespace {
 			ret += msg;
 		}
 		return ret;
+#endif
 	}
 
 	span<std::int64_t const> session_stats_alert::counters() const
@@ -1952,11 +2286,15 @@ namespace {
 
 	std::string dht_stats_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char buf[2048];
 		std::snprintf(buf, sizeof(buf), "DHT stats: reqs: %d buckets: %d"
 			, int(active_requests.size())
 			, int(routing_table.size()));
 		return buf;
+#endif
 	}
 
 	url_seed_alert::url_seed_alert(aux::stack_allocator& alloc, torrent_handle const& h
@@ -1984,8 +2322,12 @@ namespace {
 
 	std::string url_seed_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " url seed ("
 			+ server_url() + ") failed: " + convert_from_native(error.message());
+#endif
 	}
 
 	char const* url_seed_alert::server_url() const
@@ -2020,9 +2362,13 @@ namespace {
 
 	std::string file_error_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		return torrent_alert::message() + " "
 			+ operation_name(op) + " (" + filename()
 			+ ") error: " + convert_from_native(error.message());
+#endif
 	}
 
 	incoming_request_alert::incoming_request_alert(aux::stack_allocator& alloc
@@ -2034,11 +2380,15 @@ namespace {
 
 	std::string incoming_request_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[1024];
 		std::snprintf(msg, sizeof(msg), "%s: incoming request [ piece: %d start: %d length: %d ]"
 			, peer_alert::message().c_str(), static_cast<int>(req.piece)
 			, req.start, req.length);
 		return msg;
+#endif
 	}
 
 	dht_log_alert::dht_log_alert(aux::stack_allocator& alloc
@@ -2055,6 +2405,9 @@ namespace {
 
 	std::string dht_log_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		static char const* const dht_modules[] =
 		{
 			"tracker",
@@ -2068,6 +2421,7 @@ namespace {
 		std::snprintf(ret, sizeof(ret), "DHT %s: %s", dht_modules[module]
 			, log_message());
 		return ret;
+#endif
 	}
 
 	dht_pkt_alert::dht_pkt_alert(aux::stack_allocator& alloc
@@ -2090,6 +2444,9 @@ namespace {
 
 	std::string dht_pkt_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		bdecode_node print;
 		error_code ec;
 
@@ -2106,6 +2463,7 @@ namespace {
 			, print_endpoint(node).c_str(), msg.c_str());
 
 		return buf;
+#endif
 	}
 
 	dht_get_peers_reply_alert::dht_get_peers_reply_alert(aux::stack_allocator& alloc
@@ -2138,10 +2496,14 @@ namespace {
 
 	std::string dht_get_peers_reply_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), "incoming dht get_peers reply: %s, peers %d"
 			, aux::to_hex(info_hash).c_str(), num_peers());
 		return msg;
+#endif
 	}
 
 	int dht_get_peers_reply_alert::num_peers() const
@@ -2199,12 +2561,16 @@ namespace {
 
 	std::string dht_direct_response_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[1050];
 		std::snprintf(msg, sizeof(msg), "DHT direct response (address=%s) [ %s ]"
 			, endpoint.address().to_string().c_str()
 			, m_response_size ? std::string(m_alloc.get().ptr(m_response_idx)
 				, aux::numeric_cast<std::size_t>(m_response_size)).c_str() : "");
 		return msg;
+#endif
 	}
 
 	bdecode_node dht_direct_response_alert::response() const
@@ -2262,6 +2628,9 @@ namespace {
 
 	std::string picker_log_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		static char const* const flag_names[] =
 		{
 			"partial_ratio ",
@@ -2279,8 +2648,8 @@ namespace {
 			"reverse_sequential ",
 			"backup1 ",
 			"backup2 ",
-			"end_game "
-			"extent_affinity "
+			"end_game ",
+			"extent_affinity ",
 		};
 
 		std::string ret = peer_alert::message();
@@ -2305,6 +2674,7 @@ namespace {
 			ret += buf;
 		}
 		return ret;
+#endif
 	}
 
 	session_error_alert::session_error_alert(aux::stack_allocator& alloc
@@ -2316,6 +2686,9 @@ namespace {
 
 	std::string session_error_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char buf[400];
 		if (error)
 		{
@@ -2329,6 +2702,7 @@ namespace {
 				, m_alloc.get().ptr(m_msg_idx));
 		}
 		return buf;
+#endif
 	}
 
 namespace {
@@ -2413,10 +2787,14 @@ namespace {
 
 	std::string dht_live_nodes_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), "dht live nodes for id: %s, nodes %d"
 			, aux::to_hex(node_id).c_str(), num_nodes());
 		return msg;
+#endif
 	}
 
 	int dht_live_nodes_alert::num_nodes() const
@@ -2436,6 +2814,9 @@ namespace {
 
 	std::string session_stats_header_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		std::string stats_header = "session stats header: ";
 		std::vector<stats_metric> stats = session_stats_metrics();
 		std::sort(stats.begin(), stats.end()
@@ -2450,6 +2831,7 @@ namespace {
 		}
 
 		return stats_header;
+#endif
 	}
 
 	dht_sample_infohashes_alert::dht_sample_infohashes_alert(aux::stack_allocator& alloc
@@ -2475,11 +2857,15 @@ namespace {
 
 	std::string dht_sample_infohashes_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char msg[200];
 		std::snprintf(msg, sizeof(msg)
 			, "incoming dht sample_infohashes reply from: %s, samples %d"
 			, print_endpoint(endpoint).c_str(), m_num_samples);
 		return msg;
+#endif
 	}
 
 	int dht_sample_infohashes_alert::num_samples() const
@@ -2522,10 +2908,14 @@ namespace {
 
 	std::string block_uploaded_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		char ret[200];
 		snprintf(ret, sizeof(ret), "%s block uploaded to a peer (piece: %d block: %d)"
-			, torrent_alert::message().c_str(), static_cast<int>(piece_index), block_index);
+			, peer_alert::message().c_str(), static_cast<int>(piece_index), block_index);
 		return ret;
+#endif
 	}
 
 	alerts_dropped_alert::alerts_dropped_alert(aux::stack_allocator&
@@ -2582,7 +2972,7 @@ namespace {
 		"dht_pkt", "dht_get_peers_reply", "dht_direct_response",
 		"picker_log", "session_error", "dht_live_nodes",
 		"session_stats_header", "dht_sample_infohashes",
-		"block_uploaded", "alerts_dropped"
+		"block_uploaded", "alerts_dropped", "socks5"
 		}};
 
 		TORRENT_ASSERT(alert_type >= 0);
@@ -2592,6 +2982,9 @@ namespace {
 
 	std::string alerts_dropped_alert::message() const
 	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
 		std::string ret = "dropped alerts: ";
 
 		TORRENT_ASSERT(int(dropped_alerts.size()) == num_alert_types);
@@ -2603,6 +2996,26 @@ namespace {
 		}
 
 		return ret;
+#endif
+	}
+
+	socks5_alert::socks5_alert(aux::stack_allocator&
+		, tcp::endpoint const& ep, operation_t operation, error_code const& ec)
+		: error(ec)
+		, op(operation)
+		, ip(ep)
+	{}
+
+	std::string socks5_alert::message() const
+	{
+#ifdef TORRENT_DISABLE_ALERT_MSG
+		return {};
+#else
+		char buf[512];
+		std::snprintf(buf, sizeof(buf), "SOCKS5 error. op: %s ec: %s ep: %s"
+			, operation_name(op), error.message().c_str(), print_endpoint(ip).c_str());
+		return buf;
+#endif
 	}
 
 	// this will no longer be necessary in C++17
@@ -2693,6 +3106,7 @@ namespace {
 	constexpr alert_category_t dht_sample_infohashes_alert::static_category;
 	constexpr alert_category_t block_uploaded_alert::static_category;
 	constexpr alert_category_t alerts_dropped_alert::static_category;
+	constexpr alert_category_t socks5_alert::static_category;
 #if TORRENT_ABI_VERSION == 1
 	constexpr alert_category_t anonymous_mode_alert::static_category;
 	constexpr alert_category_t mmap_cache_alert::static_category;

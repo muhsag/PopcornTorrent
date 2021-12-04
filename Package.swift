@@ -18,28 +18,27 @@ let package = Package(
             name: "PopcornTorrent",
             dependencies: ["GCDWebServer"],
             path: "PopcornTorrent/Sources",
-            exclude: ["torrent/Makefile.am", "torrent/Makefile.in"],
+            exclude: ["torrent/Makefile.am"],
             cxxSettings: [
                 .define("TARGET_OS_IOS", .when(platforms: [.iOS])),
                 .define("TARGET_OS_TV", .when(platforms: [.tvOS])),
                 .define("TARGET_OS_MAC", .when(platforms: [.macOS])),
-                .define("BOOST_ASIO_ENABLE_CANCELIO"),
+//                .define("BOOST_ASIO_ENABLE_CANCELIO"),
                 .define("BOOST_ASIO_HASH_MAP_BUCKETS", to: "1021"),
-                .define("BOOST_FILESYSTEM_VERSION", to: "3"),
-                .define("WITH_SHIPPED_GEOIP_H"),
-                .define("TORRENT_USE_TOMMATH"),
-                .define("BOOST_ASIO_SEPARATE_COMPILATION"),
-                .define("TORRENT_BUILDING_STATIC"),
+//                .define("BOOST_FILESYSTEM_VERSION", to: "3"),
                 .headerSearchPath("../../include/"),
             ]
         ),
         .testTarget(name: "PopcornTorrent-Tests",
                     dependencies: [.targetItem(name: "PopcornTorrent", condition: nil)],
                     path: "PopcornTorrentTests",
-                    exclude: ["Test.torrent"]
-                    ,linkerSettings: [.linkedFramework("MediaPlayer"), .linkedFramework("SystemConfiguration")]
+                    resources: [.process("Test.torrent")],
+                    linkerSettings: [
+                        .linkedFramework("MediaPlayer"),
+                        .linkedFramework("SystemConfiguration")
+                    ]
                    )
     ],
     cLanguageStandard: .gnu99,
-    cxxLanguageStandard: .gnucxx11
+    cxxLanguageStandard: .gnucxx14
 )

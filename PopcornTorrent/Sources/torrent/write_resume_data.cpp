@@ -69,15 +69,29 @@ namespace libtorrent {
 		ret["num_incomplete"] = atp.num_incomplete;
 		ret["num_downloaded"] = atp.num_downloaded;
 
-		ret["sequential_download"] = bool(atp.flags & torrent_flags::sequential_download);
-
 		ret["seed_mode"] = bool(atp.flags & torrent_flags::seed_mode);
+		ret["upload_mode"] = bool(atp.flags & torrent_flags::upload_mode);
+#ifndef TORRENT_DISABLE_SHARE_MODE
+		ret["share_mode"] = bool(atp.flags & torrent_flags::share_mode);
+#endif
+		ret["apply_ip_filter"] = bool(atp.flags & torrent_flags::apply_ip_filter);
+		ret["paused"] = bool(atp.flags & torrent_flags::paused);
+		ret["auto_managed"] = bool(atp.flags & torrent_flags::auto_managed);
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 		ret["super_seeding"] = bool(atp.flags & torrent_flags::super_seeding);
+#endif
+		ret["sequential_download"] = bool(atp.flags & torrent_flags::sequential_download);
+		ret["stop_when_ready"] = bool(atp.flags & torrent_flags::stop_when_ready);
+		ret["disable_dht"] = bool(atp.flags & torrent_flags::disable_dht);
+		ret["disable_lsd"] = bool(atp.flags & torrent_flags::disable_lsd);
+		ret["disable_pex"] = bool(atp.flags & torrent_flags::disable_pex);
 
 		ret["added_time"] = atp.added_time;
 		ret["completed_time"] = atp.completed_time;
 
 		ret["save_path"] = atp.save_path;
+
+		if (!atp.name.empty()) ret["name"] = atp.name;
 
 #if TORRENT_ABI_VERSION == 1
 		// deprecated in 1.2
@@ -215,9 +229,7 @@ namespace libtorrent {
 		ret["upload_rate_limit"] = atp.upload_limit;
 		ret["download_rate_limit"] = atp.download_limit;
 		ret["max_connections"] = atp.max_connections;
-		ret["max_uploads"] = atp.upload_limit;
-		ret["paused"] = bool(atp.flags & torrent_flags::paused);
-		ret["auto_managed"] = bool(atp.flags & torrent_flags::auto_managed);
+		ret["max_uploads"] = atp.max_uploads;
 
 		if (!atp.file_priorities.empty())
 		{

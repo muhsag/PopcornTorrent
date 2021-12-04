@@ -41,6 +41,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/invariant_check.hpp"
 #include "libtorrent/performance_counters.hpp"
 #include "libtorrent/io_service.hpp"
+#include "libtorrent/aux_/storage_utils.hpp" // for iovec_t
 #include <cstdint>
 #include <limits>
 
@@ -313,18 +314,6 @@ struct utp_socket_impl
 	// i.e. transition to the UTP_STATE_DELETED state
 	void* m_userdata;
 
-	// This is a platform-independent replacement
-	// for the regular iovec type in posix. Since
-	// it's not used in any system call, we might as
-	// well define our own type instead of wrapping
-	// the system's type.
-	struct iovec_t
-	{
-		iovec_t(void* b, std::size_t l): buf(b), len(l) {}
-		void* buf;
-		std::size_t len;
-	};
-
 	// if there's currently an async read or write
 	// operation in progress, these buffers are initialized
 	// and used, otherwise any bytes received are stuck in
@@ -332,7 +321,7 @@ struct utp_socket_impl
 	// as we flush from the write buffer, individual iovecs
 	// are updated to only refer to unflushed portions of the
 	// buffers. Buffers that empty are erased from the vector.
-	std::vector<iovec_t> m_write_buffer;
+	std::vector<span<char const>> m_write_buffer;
 
 	// if this is non nullptr, it's a packet. This packet was held off because
 	// of NAGLE. We couldn't send it immediately. It's left
@@ -728,7 +717,21 @@ void utp_socket_impl::update_mtu_limits()
 {
 	INVARIANT_CHECK;
 
-	if (m_mtu_floor > m_mtu_ceiling) m_mtu_floor = m_mtu_ceiling;
+	if (m_mtu_floor > m_mtu_ceiling)
+	{
+		// this is the case where we drop an MTU probe once we're in steady
+		// state. Assume the probe was lost by chance, and don't decrement the
+		// ceiling. We're still restarting the Path MTU discovery, so if the MTU
+		// did in fact chance, we'll be notified again, when not in steady
+		// state.
+		m_mtu_ceiling = m_mtu_floor;
+
+		// the path MTU may have changed. Perform another search
+		// dont' start all the way from start, just half way down.
+		m_mtu_floor = ((TORRENT_INET_MIN_MTU - TORRENT_IPV4_HEADER - TORRENT_UDP_HEADER) + m_mtu_ceiling) / 2;
+
+		UTP_LOGV("%8p: reducing MTU floor\n", static_cast<void*>(this));
+	}
 
 	m_mtu = (m_mtu_floor + m_mtu_ceiling) / 2;
 
@@ -821,7 +824,7 @@ utp_stream::endpoint_type utp_stream::local_endpoint(error_code& ec) const
 		return endpoint_type();
 	}
 
-	udp::endpoint ep = s->local_endpoint();
+	udp::endpoint ep = s->get_local_endpoint();
 	return endpoint_type(ep.address(), ep.port());
 }
 
@@ -921,52 +924,53 @@ void utp_stream::on_connect(void* self, error_code const& ec, bool const shutdow
 	}
 }
 
-void utp_stream::add_read_buffer(void* buf, std::size_t const len)
+void utp_stream::add_read_buffer(void* buf, int const len)
 {
 	TORRENT_ASSERT(m_impl);
 	TORRENT_ASSERT(len < INT_MAX);
 	TORRENT_ASSERT(len > 0);
 	TORRENT_ASSERT(buf);
-	m_impl->m_read_buffer.emplace_back(buf, len);
-	m_impl->m_read_buffer_size += int(len);
-
 	UTP_LOGV("%8p: add_read_buffer %d bytes\n", static_cast<void*>(m_impl), int(len));
+	if (len <= 0) return;
+	m_impl->m_read_buffer.emplace_back(reinterpret_cast<char*>(buf), len);
+	m_impl->m_read_buffer_size += len;
 }
 
 // this is the wrapper to add a user provided write buffer to the
 // utp_socket_impl. It makes sure the m_write_buffer_size is kept
 // up to date
-void utp_stream::add_write_buffer(void const* buf, std::size_t const len)
+void utp_stream::add_write_buffer(void const* buf, int const len)
 {
 	TORRENT_ASSERT(m_impl);
 	TORRENT_ASSERT(len < INT_MAX);
 	TORRENT_ASSERT(len > 0);
 	TORRENT_ASSERT(buf);
 
+	UTP_LOGV("%8p: add_write_buffer %d bytes\n", static_cast<void*>(m_impl), int(len));
+	if (len <= 0) return;
+
 #if TORRENT_USE_ASSERTS
-	int write_buffer_size = 0;
+	std::ptrdiff_t write_buffer_size = 0;
 	for (auto const& i : m_impl->m_write_buffer)
 	{
-		TORRENT_ASSERT(std::numeric_limits<int>::max() - int(i.len) > write_buffer_size);
-		write_buffer_size += int(i.len);
+		TORRENT_ASSERT(std::numeric_limits<int>::max() - i.size() > write_buffer_size);
+		write_buffer_size += i.size();
 	}
 	TORRENT_ASSERT(m_impl->m_write_buffer_size == write_buffer_size);
 #endif
 
-	m_impl->m_write_buffer.emplace_back(const_cast<void*>(buf), len);
-	m_impl->m_write_buffer_size += int(len);
+	m_impl->m_write_buffer.emplace_back(reinterpret_cast<char const*>(buf), len);
+	m_impl->m_write_buffer_size += len;
 
 #if TORRENT_USE_ASSERTS
 	write_buffer_size = 0;
 	for (auto const& i : m_impl->m_write_buffer)
 	{
-		TORRENT_ASSERT(std::numeric_limits<int>::max() - int(i.len) > write_buffer_size);
-		write_buffer_size += int(i.len);
+		TORRENT_ASSERT(std::numeric_limits<int>::max() - i.size() > write_buffer_size);
+		write_buffer_size += i.size();
 	}
 	TORRENT_ASSERT(m_impl->m_write_buffer_size == write_buffer_size);
 #endif
-
-	UTP_LOGV("%8p: add_write_buffer %d bytes\n", static_cast<void*>(m_impl), int(len));
 }
 
 // this is called when all user provided read buffers have been added
@@ -997,7 +1001,8 @@ void utp_stream::issue_read()
 
 std::size_t utp_stream::read_some(bool const clear_buffers)
 {
-	if (m_impl->m_receive_buffer_size == 0)
+	TORRENT_ASSERT(m_impl->m_receive_buffer_size >= 0);
+	if (m_impl->m_receive_buffer_size <= 0)
 	{
 		if (clear_buffers)
 		{
@@ -1027,25 +1032,31 @@ std::size_t utp_stream::read_some(bool const clear_buffers)
 		m_impl->check_receive_buffers();
 #endif
 
-		packet* p = i->get();
-		int to_copy = std::min(p->size - p->header_size, aux::numeric_cast<int>(target->len));
+		packet* const p = i->get();
+
+		// the number of bytes to copy is added to the 16 bit header field
+		// p->header_size, so we have to make sure we stay within that limit
+		int const to_copy = static_cast<int>(std::min({
+			std::ptrdiff_t(p->size - p->header_size)
+			, target->size()
+			, std::ptrdiff_t(std::numeric_limits<std::uint16_t>::max() - p->header_size)}));
 		TORRENT_ASSERT(to_copy >= 0);
-		std::memcpy(target->buf, p->buf + p->header_size, std::size_t(to_copy));
+		std::memcpy(target->data(), p->buf + p->header_size, std::size_t(to_copy));
 		ret += std::size_t(to_copy);
-		target->buf = static_cast<char*>(target->buf) + to_copy;
-		TORRENT_ASSERT(target->len >= std::size_t(to_copy));
-		target->len -= std::size_t(to_copy);
+
+		TORRENT_ASSERT(target->size() >= to_copy);
+		*target = target->subspan(to_copy);
+
+		TORRENT_ASSERT(m_impl->m_receive_buffer_size >= to_copy);
 		m_impl->m_receive_buffer_size -= to_copy;
 		TORRENT_ASSERT(m_impl->m_read_buffer_size >= to_copy);
 		m_impl->m_read_buffer_size -= to_copy;
 		p->header_size += std::uint16_t(to_copy);
-		if (target->len == 0) target = m_impl->m_read_buffer.erase(target);
+		if (target->size() == 0) target = m_impl->m_read_buffer.erase(target);
 
 #if TORRENT_USE_INVARIANT_CHECKS
 		m_impl->check_receive_buffers();
 #endif
-
-		TORRENT_ASSERT(m_impl->m_receive_buffer_size >= 0);
 
 		// Consumed entire packet
 		if (p->header_size == p->size)
@@ -1056,7 +1067,8 @@ std::size_t utp_stream::read_some(bool const clear_buffers)
 			++i;
 		}
 
-		if (m_impl->m_receive_buffer_size == 0)
+		TORRENT_ASSERT(m_impl->m_receive_buffer_size >= 0);
+		if (m_impl->m_receive_buffer_size <= 0)
 		{
 			UTP_LOGV("%8p: Didn't fill entire target: %d bytes left in buffer\n"
 				, static_cast<void*>(m_impl), m_impl->m_receive_buffer_size);
@@ -1611,11 +1623,11 @@ void utp_socket_impl::write_payload(std::uint8_t* ptr, int size)
 	INVARIANT_CHECK;
 
 #if TORRENT_USE_ASSERTS
-	int write_buffer_size = 0;
+	std::ptrdiff_t write_buffer_size = 0;
 	for (auto const& i : m_write_buffer)
 	{
-		TORRENT_ASSERT(std::numeric_limits<int>::max() - int(i.len) > write_buffer_size);
-		write_buffer_size += int(i.len);
+		TORRENT_ASSERT(std::numeric_limits<int>::max() - i.size() > write_buffer_size);
+		write_buffer_size += i.size();
 	}
 	TORRENT_ASSERT(m_write_buffer_size == write_buffer_size);
 #endif
@@ -1623,24 +1635,25 @@ void utp_socket_impl::write_payload(std::uint8_t* ptr, int size)
 	TORRENT_ASSERT(m_write_buffer_size >= size);
 	auto i = m_write_buffer.begin();
 
-	if (size == 0) return;
+	if (size <= 0) return;
 
 	int buffers_to_clear = 0;
 	while (size > 0)
 	{
+		TORRENT_ASSERT(i != m_write_buffer.end());
+
 		// i points to the iovec we'll start copying from
-		int to_copy = std::min(size, int(i->len));
+		int const to_copy = static_cast<int>(std::min(std::ptrdiff_t(size), i->size()));
 		TORRENT_ASSERT(to_copy >= 0);
 		TORRENT_ASSERT(to_copy < INT_MAX / 2 && m_written < INT_MAX / 2);
-		std::memcpy(ptr, static_cast<char const*>(i->buf), std::size_t(to_copy));
+		std::memcpy(ptr, i->data(), std::size_t(to_copy));
 		size -= to_copy;
 		m_written += to_copy;
 		ptr += to_copy;
-		i->len -= std::size_t(to_copy);
+		*i = i->subspan(to_copy);
 		TORRENT_ASSERT(m_write_buffer_size >= to_copy);
 		m_write_buffer_size -= to_copy;
-		i->buf = static_cast<char*>(i->buf) + to_copy;
-		if (i->len == 0) ++buffers_to_clear;
+		if (i->size() == 0) ++buffers_to_clear;
 		++i;
 	}
 
@@ -1652,8 +1665,8 @@ void utp_socket_impl::write_payload(std::uint8_t* ptr, int size)
 	write_buffer_size = 0;
 	for (auto const& j : m_write_buffer)
 	{
-		TORRENT_ASSERT(std::numeric_limits<int>::max() - int(j.len) > write_buffer_size);
-		write_buffer_size += int(j.len);
+		TORRENT_ASSERT(std::numeric_limits<int>::max() - j.size() > write_buffer_size);
+		write_buffer_size += j.size();
 	}
 	TORRENT_ASSERT(m_write_buffer_size == write_buffer_size);
 #endif
@@ -1712,6 +1725,8 @@ void utp_socket_impl::remove_sack_header(packet* p)
 // send_pkt() again)
 // returns true if there is more space for payload in our
 // congestion window, false if there is no more space.
+// m_seq_nr is only incremented when sending packets with data payload. i.e. not
+// for ST_STATE or ST_FIN packets
 bool utp_socket_impl::send_pkt(int const flags)
 {
 #ifdef TORRENT_EXPENSIVE_INVARIANT_CHECKS
@@ -1757,7 +1772,6 @@ bool utp_socket_impl::send_pkt(int const flags)
 	// probes, to be able to distinguish a loss of the probe vs. just loss in
 	// general.
 	bool const mtu_probe = (m_mtu_seq == 0
-		&& m_write_buffer_size >= m_mtu_floor * 3
 		&& m_seq_nr != 0
 		&& (m_cwnd >> 16) > m_mtu_floor * 3);
 	// for non MTU-probes, use the conservative packet size
@@ -1783,7 +1797,6 @@ bool utp_socket_impl::send_pkt(int const flags)
 		+ (sack ? sack + 2 : 0)
 		+ (close_reason ? 6 : 0);
 
-	// for non MTU-probes, use the conservative packet size
 	int payload_size = std::min(m_write_buffer_size
 		, effective_mtu - header_size);
 	TORRENT_ASSERT(payload_size >= 0);
@@ -1905,23 +1918,27 @@ bool utp_socket_impl::send_pkt(int const flags)
 		else
 			sack = 0;
 
-		std::int32_t const size_left = std::min(p->allocated - p->size
-			, m_write_buffer_size);
+		std::int32_t const size_left = std::min({
+			p->allocated - p->size
+			, m_write_buffer_size
+			, effective_mtu - p->size});
 
-		write_payload(p->buf + p->size, size_left);
-		p->size += std::uint16_t(size_left);
+		if (size_left > 0) {
+			write_payload(p->buf + p->size, size_left);
+			p->size += std::uint16_t(size_left);
 
-		if (size_left > 0)
-		{
-			UTP_LOGV("%8p: NAGLE appending %d bytes to nagle packet. new size: %d allocated: %d\n"
-				, static_cast<void*>(this), size_left, p->size, p->allocated);
+			if (size_left > 0)
+			{
+				UTP_LOGV("%8p: NAGLE appending %d bytes to nagle packet. new size: %d allocated: %d\n"
+					, static_cast<void*>(this), size_left, p->size, p->allocated);
+			}
 		}
 
 		// did we fill up the whole mtu?
 		// if we didn't, we may still send it if there's
 		// no bytes in flight
 		if (m_bytes_in_flight > 0
-			&& p->size < std::min(p->allocated, m_mtu_floor)
+			&& int(p->size) < std::min(int(p->allocated), effective_mtu)
 			&& !force
 			&& m_nagle)
 		{
@@ -1931,7 +1948,9 @@ bool utp_socket_impl::send_pkt(int const flags)
 			return false;
 		}
 
+#if TORRENT_USE_ASSERTS
 		payload_size = p->size - p->header_size;
+#endif
 	}
 
 	if (sack)
@@ -1951,7 +1970,7 @@ bool utp_socket_impl::send_pkt(int const flags)
 	}
 
 	if (m_bytes_in_flight > 0
-		&& p->size < p->allocated
+		&& int(p->size) < std::min(int(p->allocated), effective_mtu)
 		&& !force
 		&& m_nagle)
 	{
@@ -1972,7 +1991,7 @@ bool utp_socket_impl::send_pkt(int const flags)
 
 	// for ST_DATA packets, payload size is 0. Such packets do not have unique
 	// sequence numbers and should never be used as mtu probes
-	if ((mtu_probe || p->mtu_probe) && payload_size > m_mtu_floor)
+	if ((mtu_probe || p->mtu_probe) && p->size >= m_mtu_floor)
 	{
 		p->mtu_probe = true;
 		m_mtu_seq = m_seq_nr;
@@ -2030,7 +2049,6 @@ bool utp_socket_impl::send_pkt(int const flags)
 		// since we'd have to repacketize
 		TORRENT_ASSERT(p->mtu_probe);
 		m_mtu_ceiling = p->size - 1;
-		if (m_mtu_floor > m_mtu_ceiling) m_mtu_floor = m_mtu_ceiling;
 		update_mtu_limits();
 		// resend the packet immediately without
 		// it being an MTU probe
@@ -2391,6 +2409,14 @@ void utp_socket_impl::incoming(std::uint8_t const* buf, int size, packet_ptr p
 	INVARIANT_CHECK;
 #endif
 
+	TORRENT_ASSERT(size >= 0);
+	if (size <= 0) return;
+
+	// if a packet, p, is passed in here, the buf argument is ignored, and size
+	// is redundant, as it must match p->size
+	TORRENT_ASSERT(!p || p->size - p->header_size == size);
+	TORRENT_ASSERT(!p || !buf);
+
 	while (!m_read_buffer.empty())
 	{
 		UTP_LOGV("%8p: incoming: have user buffer (%d)\n", static_cast<void*>(this), m_read_buffer_size);
@@ -2401,18 +2427,17 @@ void utp_socket_impl::incoming(std::uint8_t const* buf, int size, packet_ptr p
 		}
 		iovec_t* target = &m_read_buffer.front();
 
-		int const to_copy = std::min(size, aux::numeric_cast<int>(target->len));
+		int const to_copy = static_cast<int>(std::min(std::ptrdiff_t(size), target->size()));
 		TORRENT_ASSERT(to_copy >= 0);
-		std::memcpy(target->buf, buf, std::size_t(to_copy));
+		std::memcpy(target->data(), buf, std::size_t(to_copy));
 		m_read += to_copy;
-		target->buf = reinterpret_cast<std::uint8_t*>(target->buf) + to_copy;
-		target->len -= std::size_t(to_copy);
+		*target = target->subspan(to_copy);
 		buf += to_copy;
-		UTP_LOGV("%8p: copied %d bytes into user receive buffer\n", static_cast<void*>(this), to_copy);
 		TORRENT_ASSERT(m_read_buffer_size >= to_copy);
 		m_read_buffer_size -= to_copy;
 		size -= to_copy;
-		if (target->len == 0) m_read_buffer.erase(m_read_buffer.begin());
+		UTP_LOGV("%8p: copied %d bytes into user receive buffer\n", static_cast<void*>(this), to_copy);
+		if (target->size() == 0) m_read_buffer.erase(m_read_buffer.begin());
 		if (p)
 		{
 			p->header_size += std::uint16_t(to_copy);
@@ -2748,8 +2773,10 @@ bool utp_socket_impl::incoming_packet(span<std::uint8_t const> buf
 	// something is wrong.
 	// If our state is state_none, this packet must be a syn packet
 	// and the ack_nr should be ignored
+	// Note that when we send a FIN, we don't increment m_seq_nr
 	std::uint16_t const cmp_seq_nr =
-		(m_state == UTP_STATE_SYN_SENT && ph->get_type() == ST_STATE)
+		((m_state == UTP_STATE_SYN_SENT || m_state == UTP_STATE_FIN_SENT)
+			&& ph->get_type() == ST_STATE)
 		? m_seq_nr : (m_seq_nr - 1) & ACK_MASK;
 
 	if ((m_state != UTP_STATE_NONE || ph->get_type() != ST_SYN)
@@ -3338,7 +3365,10 @@ bool utp_socket_impl::incoming_packet(span<std::uint8_t const> buf
 				break;
 			}
 
-			if (m_acked_seq_nr == ((m_seq_nr - 1) & ACK_MASK))
+			// we don't increment m_seq_nr when sending a FIN, so we actually
+			// need to wait for m_acked_sen_nr to reach m_seq_nr before the FIN
+			// is considered ACKed
+			if (m_acked_seq_nr == m_seq_nr)
 			{
 				// When this happens we know that the remote side has
 				// received all of our packets.

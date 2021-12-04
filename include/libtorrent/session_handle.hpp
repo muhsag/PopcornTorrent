@@ -39,7 +39,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/torrent_handle.hpp"
 #include "libtorrent/add_torrent_params.hpp"
 #include "libtorrent/disk_io_thread.hpp" // for cached_piece_info
-#include "libtorrent/alert.hpp" // alert::error_notification
+#include "libtorrent/alert.hpp" // alert_category::error
 #include "libtorrent/peer_class.hpp"
 #include "libtorrent/peer_class_type_filter.hpp"
 #include "libtorrent/peer_id.hpp"
@@ -69,7 +69,8 @@ namespace libtorrent {
 	// this class provides a non-owning handle to a session and a subset of the
 	// interface of the session class. If the underlying session is destructed
 	// any handle to it will no longer be valid. is_valid() will return false and
-	// any operation on it will throw an invalid_session_handle.
+	// any operation on it will throw a system_error exception, with error code
+	// invalid_session_handle.
 	struct TORRENT_EXPORT session_handle
 	{
 		friend class session;
@@ -81,6 +82,11 @@ namespace libtorrent {
 		session_handle(session_handle&& t) noexcept = default;
 		session_handle& operator=(session_handle const&) = default;
 		session_handle& operator=(session_handle&&) noexcept = default;
+
+#if TORRENT_ABI_VERSION == 1
+		using save_state_flags_t = libtorrent::save_state_flags_t;
+		using session_flags_t = libtorrent::session_flags_t;
+#endif
 
 		// returns true if this handle refers to a valid session object. If the
 		// session has been destroyed, all session_handle objects will expire and
@@ -138,7 +144,7 @@ namespace libtorrent {
 		// which determines if a torrent should be included in the returned set
 		// or not. Returning true means it should be included and false means
 		// excluded. The ``flags`` argument is the same as to
-		// ``torrent_handle::status()``. Since ``pred`` is guaranteed to be
+		// torrent_handle::status(). Since ``pred`` is guaranteed to be
 		// called for every torrent, it may be used to count the number of
 		// torrents of different categories as well.
 		//
@@ -178,7 +184,7 @@ namespace libtorrent {
 		// Only torrents who has the state subscription flag set will be
 		// included. This flag is on by default. See add_torrent_params.
 		// the ``flags`` argument is the same as for torrent_handle::status().
-		// see torrent_handle::status_flags_t.
+		// see status_flags_t in torrent_handle.
 		void post_torrent_updates(status_flags_t flags = status_flags_t::all());
 
 		// This function will post a session_stats_alert object, containing a
@@ -228,7 +234,12 @@ namespace libtorrent {
 		// ``std::exception`` unless duplicate_is_error is set to false. In that
 		// case, add_torrent() will return the handle to the existing torrent.
 		//
-		// all torrent_handles must be destructed before the session is destructed!
+		// The add_torrent_params class has a flags field. It can be used to
+		// control what state the new torrent will be added in. Common flags to
+		// want to control are torrent_flags::paused and
+		// torrent_flags::auto_managed. In order to add a magnet link that will
+		// just download the metadata, but no payload, set the
+		// torrent_flags::upload_mode flag.
 #ifndef BOOST_NO_EXCEPTIONS
 		torrent_handle add_torrent(add_torrent_params&& params);
 		torrent_handle add_torrent(add_torrent_params const& params);
@@ -302,11 +313,15 @@ namespace libtorrent {
 		TORRENT_DEPRECATED
 		void set_load_function(user_load_function_t fun);
 
+#include "libtorrent/aux_/disable_warnings_push.hpp"
+
 		// deprecated in libtorrent 1.1, use performance_counters instead
 		// returns session wide-statistics and status. For more information, see
 		// the ``session_status`` struct.
 		TORRENT_DEPRECATED
 		session_status status() const;
+
+#include "libtorrent/aux_/disable_warnings_pop.hpp"
 
 		// deprecated in libtorrent 1.1
 		// fills out the supplied vector with information for each piece that is
@@ -541,7 +556,7 @@ namespace libtorrent {
 		// 	ses.add_extension(&lt::create_smart_ban_plugin);
 		//
 		//
-		// .. _`libtorrent plugins`: libtorrent_plugins.html
+		// .. _`libtorrent plugins`: reference-Plugins.html
 		void add_extension(std::function<std::shared_ptr<torrent_plugin>(
 			torrent_handle const&, void*)> ext);
 		void add_extension(std::shared_ptr<plugin> ext);
@@ -791,17 +806,24 @@ namespace libtorrent {
 		static constexpr session_flags_t TORRENT_DEPRECATED_MEMBER start_default_features = 1_bit;
 #endif
 
+		// when set, the session will start paused. Call
+		// session_handle::resume() to start
+		static constexpr session_flags_t paused = 2_bit;
+
 		// ``remove_torrent()`` will close all peer connections associated with
 		// the torrent and tell the tracker that we've stopped participating in
 		// the swarm. This operation cannot fail. When it completes, you will
 		// receive a torrent_removed_alert.
 		//
+		// remove_torrent() is non-blocking, but will remove the torrent from the
+		// session synchronously. Calling session_handle::add_torrent() immediately
+		// afterward with the same torrent will succeed. Note that this creates a
+		// new handle which is not equal to the removed one.
+		//
 		// The optional second argument ``options`` can be used to delete all the
 		// files downloaded by this torrent. To do so, pass in the value
-		// ``session_handle::delete_files``. The removal of the torrent is asynchronous,
-		// there is no guarantee that adding the same torrent immediately after
-		// it was removed will not throw a system_error exception. Once
-		// the torrent is deleted, a torrent_deleted_alert is posted.
+		// ``session_handle::delete_files``. Once the torrent is deleted, a
+		// torrent_deleted_alert is posted.
 		//
 		// Note that when a queued or downloading torrent is removed, its position
 		// in the download queue is vacated and every subsequent torrent in the
@@ -809,6 +831,18 @@ namespace libtorrent {
 		// large state_update to be posted. When removing all torrents, it is
 		// advised to remove them from the back of the queue, to minimize the
 		// shifting.
+		//
+		// The torrent_handle remains valid for some time after remove_torrent() is
+		// called. It will become invalid only after all libtorrent tasks (such as
+		// I/O tasks) release their references to the torrent. Until this happens,
+		// torrent_handle::is_valid() will return true, and other calls such
+		// as torrent_handle::status() will succeed. Because of this, and because
+		// remove_torrent() is non-blocking, the following sequence usually
+		// succeeds (does not throw system_error):
+		// .. code:: c++
+		//
+		//	session.remove_handle(handle);
+		//	handle.save_resume_data();
 		void remove_torrent(const torrent_handle& h, remove_flags_t options = {});
 
 		// Applies the settings specified by the settings_pack ``s``. This is an
@@ -820,6 +854,11 @@ namespace libtorrent {
 
 #if TORRENT_ABI_VERSION == 1
 
+#ifdef _MSC_VER
+#pragma warning(push, 1)
+// warning C4996: X: was declared deprecated
+#pragma warning( disable : 4996 )
+#endif
 #if defined __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -833,6 +872,9 @@ namespace libtorrent {
 
 #if defined __GNUC__
 #pragma GCC diagnostic pop
+#endif
+#ifdef _MSC_VER
+#pragma warning(pop)
 #endif
 
 		// ``set_i2p_proxy`` sets the i2p_ proxy, and tries to open a persistent
@@ -1058,8 +1100,8 @@ namespace libtorrent {
 #endif
 
 		// protocols used by add_port_mapping()
-		constexpr static portmap_protocol udp = portmap_protocol::udp;
-		constexpr static portmap_protocol tcp = portmap_protocol::tcp;
+		static constexpr portmap_protocol udp = portmap_protocol::udp;
+		static constexpr portmap_protocol tcp = portmap_protocol::tcp;
 
 		// add_port_mapping adds one or more port forwards on UPnP and/or NAT-PMP,
 		// whichever is enabled. A mapping is created for each listen socket

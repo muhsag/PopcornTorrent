@@ -325,6 +325,10 @@ namespace libtorrent {
 			invalid_session_handle,
 			// the listen socket associated with this request was closed
 			invalid_listen_socket,
+			// blocked by SSRF mitigation
+			ssrf_mitigation,
+			// blocked because IDNA host names are banned
+			blocked_by_idna,
 
 #if TORRENT_ABI_VERSION == 1
 			// these error codes are deprecated, NAT-PMP/PCP error codes have
@@ -347,7 +351,6 @@ namespace libtorrent {
 			deprecated_123,
 			deprecated_124,
 #endif
-
 
 			// The resume data file is missing the ``file sizes`` entry
 			missing_file_sizes = 130,
@@ -428,6 +431,9 @@ namespace libtorrent {
 			invalid_tracker_transaction_id,
 			// invalid action field in UDP tracker response
 			invalid_tracker_action,
+			// skipped announce (because it's assumed to be unreachable over the
+			// given source network interface)
+			announce_skipped,
 
 #if TORRENT_ABI_VERSION == 1
 			// expected string in bencoded string

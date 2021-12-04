@@ -24,7 +24,6 @@ nobase_include_HEADERS = \
   choker.hpp                   \
   close_reason.hpp             \
   config.hpp                   \
-  ConvertUTF.h                 \
   copy_ptr.hpp                 \
   crc32c.hpp                   \
   create_torrent.hpp           \
@@ -164,6 +163,7 @@ nobase_include_HEADERS = \
   aux_/aligned_storage.hpp          \
   aux_/aligned_union.hpp            \
   aux_/bind_to_device.hpp           \
+  aux_/keepalive.hpp                \
   aux_/block_cache_reference.hpp    \
   aux_/container_wrapper.hpp        \
   aux_/cpuid.hpp                    \
@@ -218,6 +218,7 @@ nobase_include_HEADERS = \
   aux_/instantiate_connection.hpp   \
   aux_/range.hpp                    \
   aux_/windows.hpp                  \
+  aux_/pool.hpp                     \
   \
   extensions/smart_ban.hpp          \
   extensions/ut_metadata.hpp        \

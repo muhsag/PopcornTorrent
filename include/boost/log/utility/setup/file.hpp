@@ -36,6 +36,8 @@
 #include <boost/log/sinks/unlocked_frontend.hpp>
 #endif
 #include <boost/log/sinks/text_file_backend.hpp>
+#include <boost/log/keywords/format.hpp>
+#include <boost/log/keywords/filter.hpp>
 #include <boost/log/keywords/scan_method.hpp>
 #include <boost/log/detail/header.hpp>
 
@@ -134,13 +136,13 @@ struct file_name_param_traits< T, false >
 #ifndef BOOST_LOG_DOXYGEN_PASS
 
 #define BOOST_LOG_INIT_LOG_TO_FILE_INTERNAL(z, n, data)\
-    template< BOOST_PP_ENUM_PARAMS(n, typename T) >\
-    inline shared_ptr< BOOST_LOG_FILE_SINK_FRONTEND_INTERNAL< sinks::text_file_backend > > add_file_log(BOOST_PP_ENUM_BINARY_PARAMS(n, T, const& arg))\
+    template< BOOST_PP_ENUM_PARAMS_Z(z, n, typename T) >\
+    inline shared_ptr< BOOST_LOG_FILE_SINK_FRONTEND_INTERNAL< sinks::text_file_backend > > add_file_log(BOOST_PP_ENUM_BINARY_PARAMS_Z(z, n, T, const& arg))\
     {\
         return aux::file_name_param_traits< T0 >::wrap_add_file_log(\
             arg0\
             BOOST_PP_COMMA_IF(BOOST_PP_GREATER(n, 1))\
-            BOOST_PP_EXPR_IF(BOOST_PP_GREATER(n, 1), (BOOST_PP_ENUM_SHIFTED_PARAMS(n, arg)))\
+            BOOST_PP_EXPR_IF(BOOST_PP_GREATER(n, 1), (BOOST_PP_ENUM_SHIFTED_PARAMS_Z(z, n, arg)))\
         );\
     }
 
@@ -164,7 +166,10 @@ BOOST_PP_REPEAT_FROM_TO(1, BOOST_LOG_MAX_PARAMETER_ARGS, BOOST_LOG_INIT_LOG_TO_F
  *             \li \c time_based_rotation The predicate for time-based file rotations. See <tt>basic_text_file_backend</tt>.
  *             \li \c auto_flush A boolean flag that shows whether the sink should automatically flush the file
  *                               after each written record.
- *             \li \c target The target directory to store rotated files in. See <tt>sinks::file::make_collector</tt>.
+ *             \li \c auto_newline_mode - Specifies automatic trailing newline insertion mode. Must be a value of
+ *                                        the \c auto_newline_mode enum. By default, is <tt>auto_newline_mode::insert_if_missing</tt>.
+ *             \li \c target The target directory to store rotated files in. Enables file collector and, if specified, limits associated
+ *                           with the target directory. See <tt>sinks::file::make_collector</tt>.
  *             \li \c max_size The maximum total size of rotated files in the target directory. See <tt>sinks::file::make_collector</tt>.
  *             \li \c min_free_space Minimum free space in the target directory. See <tt>sinks::file::make_collector</tt>.
  *             \li \c max_files The maximum total number of rotated files in the target directory. See <tt>sinks::file::make_collector</tt>.
@@ -173,7 +178,11 @@ BOOST_PP_REPEAT_FROM_TO(1, BOOST_LOG_MAX_PARAMETER_ARGS, BOOST_LOG_INIT_LOG_TO_F
  *                           or a filter lambda expression.
  *             \li \c format Specifies a formatter to install into the sink. May be a string that represents a formatter,
  *                           or a formatter lambda expression (either streaming or Boost.Format-like notation).
+ *
  * \return Pointer to the constructed sink.
+ *
+ * \note The \c target named argument is required to enable the file collector and the limits associated with the target directory.
+ *       If the parameter is not specified, the file collector will not be created and the limits will not be maintained.
  */
 template< typename... ArgsT >
 shared_ptr< BOOST_LOG_FILE_SINK_FRONTEND_INTERNAL< sinks::text_file_backend > > add_file_log(ArgsT... const& args);

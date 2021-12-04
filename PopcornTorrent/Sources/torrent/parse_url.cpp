@@ -34,6 +34,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "libtorrent/parse_url.hpp"
 #include "libtorrent/string_util.hpp"
+#include "libtorrent/string_view.hpp"
 
 namespace libtorrent {
 
@@ -80,7 +81,11 @@ namespace libtorrent {
 
 		at = std::find(start, url.end(), '@');
 		colon = std::find(start, url.end(), ':');
-		end = std::find(start, url.end(), '/');
+		end = std::min({
+			std::find(start, url.end(), '/')
+			, std::find(start, url.end(), '?')
+			, std::find(start, url.end(), '#')
+			});
 
 		if (at != url.end()
 			&& colon != url.end()
@@ -126,11 +131,19 @@ namespace libtorrent {
 
 		start = end;
 exit:
+		std::string path_component(start, url.end());
+		if (path_component.empty()
+			|| path_component.front() == '?'
+			|| path_component.front() == '#')
+		{
+			path_component.insert(path_component.begin(), '/');
+		}
+
 		return std::make_tuple(std::move(protocol)
 			, std::move(auth)
 			, std::move(hostname)
 			, port
-			, std::string(start, url.end()));
+			, path_component);
 	}
 
 	// splits a url into the base url and the path
@@ -160,6 +173,43 @@ exit:
 		base.assign(url.begin(), pos);
 		path.assign(pos, url.end());
 		return std::make_tuple(std::move(base), std::move(path));
+	}
+
+	TORRENT_EXTRA_EXPORT bool is_idna(string_view hostname)
+	{
+		for (;;)
+		{
+			auto dot = hostname.find('.');
+			string_view const label = (dot == string_view::npos) ? hostname : hostname.substr(0, dot);
+			if (label.size() >= 4
+				&& (label[0] == 'x' || label[0] == 'X')
+				&& (label[1] == 'n' || label[1] == 'N')
+				&& label.substr(2, 2) == "--"_sv)
+				return true;
+			if (dot == string_view::npos) return false;
+			hostname = hostname.substr(dot + 1);
+		}
+	}
+
+	bool has_tracker_query_string(string_view query_string)
+	{
+		static string_view const tracker_args[] = {
+			"info_hash"_sv, "event"_sv, "port"_sv, "left"_sv, "key"_sv,
+			"uploaded"_sv, "downloaded"_sv, "corrupt"_sv, "peer_id"_sv
+		};
+		while (!query_string.empty())
+		{
+			string_view arg;
+			std::tie(arg, query_string) = split_string(query_string, '&');
+
+			auto const name = split_string(arg, '=').first;
+			for (auto const& tracker_arg : tracker_args)
+			{
+				if (string_equal_no_case(name, tracker_arg))
+					return true;
+			}
+		}
+		return false;
 	}
 
 }

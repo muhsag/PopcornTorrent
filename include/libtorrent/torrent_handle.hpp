@@ -254,8 +254,20 @@ namespace aux {
 		torrent_handle& operator=(torrent_handle const&) = default;
 		torrent_handle& operator=(torrent_handle&&) noexcept = default;
 
+
+#if TORRENT_ABI_VERSION == 1
+		using flags_t = add_piece_flags_t;
+		using status_flags_t = libtorrent::status_flags_t;
+		using pause_flags_t = libtorrent::pause_flags_t;
+		using save_resume_flags_t = libtorrent::resume_data_flags_t;
+		using reannounce_flags_t = libtorrent::reannounce_flags_t;
+#endif
+
 		// instruct libtorrent to overwrite any data that may already have been
-		// downloaded with the data of the new piece being added.
+		// downloaded with the data of the new piece being added. Using this
+		// flag when adding a piece that is actively being downloaded from other
+		// peers may have some unexpected consequences, as blocks currently
+		// being downloaded from peers may not be replaced.
 		static constexpr add_piece_flags_t overwrite_existing = 0_bit;
 
 		// This function will write ``data`` to the storage as piece ``piece``,
@@ -273,6 +285,9 @@ namespace aux {
 		// Since the data is written asynchronously, you may know that is passed
 		// or failed the hash check by waiting for piece_finished_alert or
 		// hash_failed_alert.
+		//
+		// Adding pieces while the torrent is being checked (i.e. in
+		// torrent_status::checking_files state) is not supported.
 		void add_piece(piece_index_t piece, char const* data, add_piece_flags_t flags = {}) const;
 
 		// This function starts an asynchronous read operation of the specified
@@ -340,7 +355,7 @@ namespace aux {
 		// filter them out.
 		//
 		// By default everything is included. The flags you can use to decide
-		// what to *include* are defined in the status_flags_t enum.
+		// what to *include* are defined in this class.
 		torrent_status status(status_flags_t flags = status_flags_t::all()) const;
 
 		// ``get_download_queue()`` takes a non-const reference to a vector which
@@ -450,7 +465,7 @@ namespace aux {
 		// the vector is empty when returning, if none of the files in the
 		// torrent are currently open.
 		//
-		// see open_file_state
+		// See open_file_state
 		std::vector<open_file_state> file_status() const;
 
 		// If the torrent is in an error state (i.e. ``torrent_status::error`` is
@@ -530,12 +545,20 @@ namespace aux {
 
 		// Returns true if this handle refers to a valid torrent and false if it
 		// hasn't been initialized or if the torrent it refers to has been
-		// aborted. Note that a handle may become invalid after it has been added
-		// to the session. Usually this is because the storage for the torrent is
-		// somehow invalid or if the filenames are not allowed (and hence cannot
-		// be opened/created) on your filesystem. If such an error occurs, a
-		// file_error_alert is generated and all handles that refers to that
-		// torrent will become invalid.
+		// removed from the session AND destructed.
+		//
+		// To tell if the torrent_handle is in the session, use
+		// torrent_handle::in_session(). This will return true before
+		// session_handle::remove_torrent() is called, and false
+		// afterward.
+		//
+		// Clients should only use is_valid() to determine if the result of
+		// session::find_torrent() was successful.
+		//
+		// Unlike other member functions which return a value, is_valid()
+		// completes immediately, without blocking on a result from the
+		// network thread. Also unlike other functions, it never throws
+		// the system_error exception.
 		bool is_valid() const;
 
 		// will delay the disconnect of peers that we're still downloading
@@ -576,8 +599,9 @@ namespace aux {
 		// ``unset_flags`` clears the specified flags, while leaving
 		// any other flags unchanged.
 		//
-		// The `seed_mode` flag is special, it can only be cleared by the
-		// `set_flags()` function, not set.
+		// The `seed_mode` flag is special, it can only be cleared once the
+		// torrent has been added, and it can only be set as part of the
+		// add_torrent_params flags, when adding the torrent.
 		torrent_flags_t flags() const;
 		void set_flags(torrent_flags_t flags, torrent_flags_t mask) const;
 		void set_flags(torrent_flags_t flags) const;
@@ -599,6 +623,8 @@ namespace aux {
 		// checking queue, and will be checked (all the files will be read and
 		// compared to the piece hashes). Once the check is complete, the torrent
 		// will start connecting to peers again, as normal.
+		// The torrent will be placed last in queue, i.e. its queue position
+		// will be the highest of all torrents in the session.
 		void force_recheck() const;
 
 		// the disk cache will be flushed before creating the resume data.
@@ -644,15 +670,6 @@ namespace aux {
 		//   session, every torrent will have its paused state saved in the
 		//   resume data!
 		//
-		//.. warning::
-		//   The resume data contains the modification timestamps for all files.
-		//   If one file has been modified when the torrent is added again, the
-		//   will be rechecked. When shutting down, make sure to flush the disk
-		//   cache before saving the resume data. This will make sure that the
-		//   file timestamps are up to date and won't be modified after saving
-		//   the resume data. The recommended way to do this is to pause the
-		//   torrent, which will flush the cache and disconnect all peers.
-		//
 		//.. note::
 		//   It is typically a good idea to save resume data whenever a torrent
 		//   is completed or paused. In those cases you don't need to pause the
@@ -685,14 +702,17 @@ namespace aux {
 		//	extern int outstanding_resume_data; // global counter of outstanding resume data
 		//	std::vector<torrent_handle> handles = ses.get_torrents();
 		//	ses.pause();
-		//	for (torrent_handle const& h : handles)
+		//	for (torrent_handle const& h : handles) try
 		//	{
-		//		if (!h.is_valid()) continue;
 		//		torrent_status s = h.status();
 		//		if (!s.has_metadata || !s.need_save_resume_data()) continue;
 		//
 		//		h.save_resume_data();
 		//		++outstanding_resume_data;
+		//	}
+		//	catch (lt::system_error const& e)
+		//	{
+		//		// the handle was invalid, ignore this one and move to the next
 		//	}
 		//
 		//	while (outstanding_resume_data > 0)
@@ -707,17 +727,17 @@ namespace aux {
 		//
 		//		for (alert* i : alerts)
 		//		{
-		//			if (alert_cast<save_resume_data_failed_alert>(a))
+		//			if (alert_cast<save_resume_data_failed_alert>(i))
 		//			{
-		//				process_alert(a);
+		//				process_alert(i);
 		//				--outstanding_resume_data;
 		//				continue;
 		//			}
 		//
-		//			save_resume_data_alert const* rd = alert_cast<save_resume_data_alert>(a);
+		//			save_resume_data_alert const* rd = alert_cast<save_resume_data_alert>(i);
 		//			if (rd == nullptr)
 		//			{
-		//				process_alert(a);
+		//				process_alert(i);
 		//				continue;
 		//			}
 		//
@@ -840,7 +860,7 @@ namespace aux {
 		// ================ start deprecation ============
 
 		// deprecated in 1.2
-
+		// use set_flags() and unset_flags() instead
 		TORRENT_DEPRECATED
 		void stop_when_ready(bool b) const;
 		TORRENT_DEPRECATED
@@ -888,7 +908,9 @@ namespace aux {
 		TORRENT_DEPRECATED
 		void set_ratio(float up_down_ratio) const;
 
-		// deprecated in 0.16. use status() instead
+		// deprecated in 0.16. use status() instead, and inspect the
+		// torrent_status::flags field. Alternatively, call flags() directly on
+		// the torrent_handle
 		TORRENT_DEPRECATED
 		bool is_seed() const;
 		TORRENT_DEPRECATED
@@ -1106,6 +1128,11 @@ namespace aux {
 		void connect_peer(tcp::endpoint const& adr, peer_source_flags_t source = {}
 			, pex_flags_t flags = pex_encryption | pex_utp | pex_holepunch) const;
 
+		// This will disconnect all peers and clear the peer list for this
+		// torrent. New peers will have to be acquired before resuming, from
+		// trackers, DHT or local service discovery, for example.
+		void clear_peers();
+
 		// ``set_max_uploads()`` sets the maximum number of peers that's unchoked
 		// at the same time on this torrent. If you set this to -1, there will be
 		// no limit. This defaults to infinite. The primary setting controlling
@@ -1202,10 +1229,12 @@ namespace aux {
 		// all wstring APIs are deprecated since 0.16.11
 		// instead, use the wchar -> utf8 conversion functions
 		// and pass in utf8 strings
+#ifdef TORRENT_WINDOWS
 		TORRENT_DEPRECATED
 		void move_storage(std::wstring const& save_path, int flags = 0) const;
 		TORRENT_DEPRECATED
 		void rename_file(file_index_t index, std::wstring const& new_name) const;
+#endif // TORRENT_WINDOWS
 
 		// Enables or disabled super seeding/initial seeding for this torrent.
 		// The torrent needs to be a seed for this to take effect.
@@ -1238,11 +1267,24 @@ namespace aux {
 		}
 
 		// This function is intended only for use by plugins and the alert
-		// dispatch function. This type does not have a stable API and should
+		// dispatch function. This type does not have a stable ABI and should
 		// be relied on as little as possible. Accessing the handle returned by
 		// this function is not thread safe outside of libtorrent's internal
 		// thread (which is used to invoke plugin callbacks).
+		// The ``torrent`` class is not only eligible for changing ABI across
+		// minor versions of libtorrent, its layout is also dependent on build
+		// configuration. This adds additional requirements on a client to be
+		// built with the exact same build configuration as libtorrent itself.
+		// i.e. the ``TORRENT_`` macros must match between libtorrent and the
+		// client builds.
 		std::shared_ptr<torrent> native_handle() const;
+
+		// Returns true if the torrent is in the session. It returns true before
+		// session::remove_torrent() is called, and false afterward.
+		//
+		// Note that this is a blocking function, unlike torrent_handle::is_valid()
+		// which returns immediately.
+		bool in_session() const;
 
 	private:
 

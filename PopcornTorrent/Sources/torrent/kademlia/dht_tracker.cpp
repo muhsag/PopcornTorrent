@@ -116,14 +116,7 @@ namespace libtorrent { namespace dht {
 
 	void dht_tracker::new_socket(aux::listen_socket_handle const& s)
 	{
-		if (s.is_ssl()) return;
-
 		address const local_address = s.get_local_endpoint().address();
-		// don't try to start dht nodes on non-global IPv6 addresses
-		// with IPv4 the interface might be behind NAT so we can't skip them based on the scope of the local address
-		// and we might not have the external address yet
-		if (local_address.is_v6() && is_local(local_address))
-			return;
 		auto stored_nid = std::find_if(m_state.nids.begin(), m_state.nids.end()
 			, [&](node_ids_t::value_type const& nid) { return nid.first == local_address; });
 		node_id const nid = stored_nid != m_state.nids.end() ? stored_nid->second : node_id();
@@ -134,6 +127,8 @@ namespace libtorrent { namespace dht {
 			, s, this, m_settings, nid, m_log, m_counters
 			, std::bind(&dht_tracker::get_node, this, _1, _2)
 			, m_storage));
+
+		update_storage_node_ids();
 
 #ifndef TORRENT_DISABLE_LOGGING
 		if (m_log->should_log(dht_logger::tracker))
@@ -157,14 +152,9 @@ namespace libtorrent { namespace dht {
 
 	void dht_tracker::delete_socket(aux::listen_socket_handle const& s)
 	{
-		if (s.is_ssl()) return;
-
-		address local_address = s.get_local_endpoint().address();
-		// since we don't start nodes on local IPv6 interfaces we don't need to remove them either
-		if (local_address.is_v6() && is_local(local_address))
-			return;
-		TORRENT_ASSERT(m_nodes.count(s) == 1);
 		m_nodes.erase(s);
+
+		update_storage_node_ids();
 	}
 
 	void dht_tracker::start(find_data::nodes_callback const& f)
@@ -647,14 +637,31 @@ namespace {
 		time_duration const delta = now - m_last_tick;
 		m_last_tick = now;
 
-		// add any new quota we've accrued since last time
-		m_send_quota += int(std::int64_t(m_settings.upload_rate_limit)
-			* total_microseconds(delta) / 1000000);
+		std::int64_t const limit = m_settings.upload_rate_limit;
 
 		// allow 3 seconds worth of burst
-		if (m_send_quota > 3 * m_settings.upload_rate_limit)
-			m_send_quota = 3 * m_settings.upload_rate_limit;
+		std::int64_t const max_accrue = std::min(3 * limit, std::int64_t(std::numeric_limits<int>::max()));
 
+		if (delta >= seconds(3)
+			|| delta >= microseconds(std::numeric_limits<int>::max() / limit))
+		{
+			m_send_quota = aux::numeric_cast<int>(max_accrue);
+			return true;
+		}
+
+		int const add = aux::numeric_cast<int>(limit * total_microseconds(delta) / 1000000);
+
+		if (max_accrue - m_send_quota < add)
+		{
+			m_send_quota = aux::numeric_cast<int>(max_accrue);
+			return true;
+		}
+		else
+		{
+			// add any new quota we've accrued since last time
+			m_send_quota += add;
+		}
+		TORRENT_ASSERT(m_send_quota <= max_accrue);
 		return m_send_quota > 0;
 	}
 
@@ -662,8 +669,10 @@ namespace {
 	{
 		TORRENT_ASSERT(m_nodes.find(s) != m_nodes.end());
 
+		static_assert(LIBTORRENT_VERSION_MINOR < 16, "version number not supported by DHT");
+		static_assert(LIBTORRENT_VERSION_TINY < 16, "version number not supported by DHT");
 		static char const version_str[] = {'L', 'T'
-			, LIBTORRENT_VERSION_MAJOR, LIBTORRENT_VERSION_MINOR};
+			, LIBTORRENT_VERSION_MAJOR, (LIBTORRENT_VERSION_MINOR << 4) | LIBTORRENT_VERSION_TINY};
 		e["v"] = std::string(version_str, version_str + 4);
 
 		m_send_buf.clear();

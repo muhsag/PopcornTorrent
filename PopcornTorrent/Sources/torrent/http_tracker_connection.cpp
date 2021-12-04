@@ -52,6 +52,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/aux_/session_settings.hpp"
 #include "libtorrent/resolver_interface.hpp"
 #include "libtorrent/ip_filter.hpp"
+#include "libtorrent/parse_url.hpp"
 
 namespace libtorrent {
 
@@ -92,11 +93,23 @@ namespace libtorrent {
 		// if request-string already contains
 		// some parameters, append an ampersand instead
 		// of a question mark
-		std::size_t arguments_start = url.find('?');
+		auto const arguments_start = url.find('?');
 		if (arguments_start != std::string::npos)
+		{
+			// tracker URLs that come pre-baked with query string arguments will be
+			// rejected when SSRF-mitigation is enabled
+			bool const ssrf_mitigation = settings.get_bool(settings_pack::ssrf_mitigation);
+			if (ssrf_mitigation && has_tracker_query_string(string_view(url).substr(arguments_start + 1)))
+			{
+				tracker_connection::fail(errors::ssrf_mitigation);
+				return;
+			}
 			url += "&";
+		}
 		else
+		{
 			url += "?";
+		}
 
 		url += "info_hash=";
 		url += escape_string({tracker_req().info_hash.data(), 20});
@@ -121,7 +134,7 @@ namespace libtorrent {
 				, escape_string({tracker_req().pid.data(), 20}).c_str()
 				// the i2p tracker seems to verify that the port is not 0,
 				// even though it ignores it otherwise
-				, i2p ? 1 : tracker_req().listen_port
+				, tracker_req().listen_port
 				, tracker_req().uploaded
 				, tracker_req().downloaded
 				, tracker_req().left
@@ -207,6 +220,7 @@ namespace libtorrent {
 			, true, settings.get_int(settings_pack::max_http_recv_buffer_size)
 			, std::bind(&http_tracker_connection::on_connect, shared_from_this(), _1)
 			, std::bind(&http_tracker_connection::on_filter, shared_from_this(), _1, _2)
+			, std::bind(&http_tracker_connection::on_filter_hostname, shared_from_this(), _1, _2)
 #ifdef TORRENT_USE_OPENSSL
 			, tracker_req().ssl_ctx
 #endif
@@ -272,6 +286,60 @@ namespace libtorrent {
 	void http_tracker_connection::on_filter(http_connection& c
 		, std::vector<tcp::endpoint>& endpoints)
 	{
+		// filter all endpoints we cannot reach from this listen socket, which may
+		// be all of them, in which case we should not announce this listen socket
+		// to this tracker
+		auto const ls = bind_socket();
+		endpoints.erase(std::remove_if(endpoints.begin(), endpoints.end()
+			, [&](tcp::endpoint const& ep) { return !ls.can_route(ep.address()); })
+			, endpoints.end());
+
+		if (endpoints.empty())
+		{
+			fail(lt::errors::announce_skipped);
+			return;
+		}
+
+		aux::session_settings const& settings = m_man.settings();
+		bool const ssrf_mitigation = settings.get_bool(settings_pack::ssrf_mitigation);
+		if (ssrf_mitigation && std::find_if(endpoints.begin(), endpoints.end()
+			, [](tcp::endpoint const& ep) { return is_loopback(ep.address()); }) != endpoints.end())
+		{
+			// there is at least one loopback address in here. If the request
+			// path for this tracker is not /announce. filter all loopback
+			// addresses.
+			std::string path;
+
+			error_code ec;
+			std::tie(std::ignore, std::ignore, std::ignore, std::ignore, path)
+				= parse_url_components(c.url(), ec);
+			if (ec)
+			{
+				fail(ec);
+				return;
+			}
+
+			// this is mitigation for Server Side request forgery. Any tracker
+			// announce to localhost need to look like a standard BitTorrent
+			// announce
+			if (path.substr(0, 9) != "/announce")
+			{
+				for (auto i = endpoints.begin(); i != endpoints.end();)
+				{
+					if (is_loopback(i->address()))
+						i = endpoints.erase(i);
+					else
+						++i;
+				}
+			}
+
+			if (endpoints.empty())
+			{
+				fail(errors::ssrf_mitigation);
+				return;
+			}
+		}
+
 		TORRENT_UNUSED(c);
 		if (!tracker_req().filter) return;
 
@@ -293,6 +361,15 @@ namespace libtorrent {
 #endif
 		if (endpoints.empty())
 			fail(errors::banned_by_ip_filter);
+	}
+
+	// returns true if the hostname is allowed
+	bool http_tracker_connection::on_filter_hostname(http_connection&
+		, string_view hostname)
+	{
+		aux::session_settings const& settings = m_man.settings();
+		if (settings.get_bool(settings_pack::allow_idna)) return true;
+		return !is_idna(hostname);
 	}
 
 	void http_tracker_connection::on_connect(http_connection& c)

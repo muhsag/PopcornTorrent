@@ -34,6 +34,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #define TORRENT_DHT_SETTINGS_HPP_INCLUDED
 
 #include "libtorrent/config.hpp"
+#include "libtorrent/aux_/export.hpp"
 #include "libtorrent/bdecode.hpp"
 #include "libtorrent/entry.hpp"
 
@@ -169,7 +170,7 @@ namespace dht {
 	struct settings : dht_settings
 	{
 		// when this is true, nodes whose IDs are derived from their source IP
-		// according to BEP 42 (http://bittorrent.org/beps/bep_0042.html) are
+		// according to BEP 42 (https://www.bittorrent.org/beps/bep_0042.html) are
 		// preferred in the routing table.
 		bool prefer_verified_node_ids = true;
 	};

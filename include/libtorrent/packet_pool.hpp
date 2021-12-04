@@ -36,13 +36,14 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/config.hpp"
 
 #include "libtorrent/aux_/throw.hpp"
-#include "libtorrent/aux_/vector.hpp"
 #include "libtorrent/aux_/numeric_cast.hpp"
 #include "libtorrent/time.hpp"
 #include "libtorrent/assert.hpp"
 #include "libtorrent/debug.hpp" // for single_threaded
 
 #include <cstdlib>
+#include <memory> // for unique_ptr
+#include <vector>
 
 namespace libtorrent {
 
@@ -210,8 +211,8 @@ namespace libtorrent {
 			else if (allocate <= m_mtu_ceiling_slab.allocate_size) { return m_mtu_ceiling_slab.alloc(); }
 			return create_packet(allocate);
 		}
-		constexpr static int mtu_floor_size = TORRENT_INET_MIN_MTU - TORRENT_IPV4_HEADER - TORRENT_UDP_HEADER;
-		constexpr static int mtu_ceiling_size = TORRENT_ETHERNET_MTU - TORRENT_IPV4_HEADER - TORRENT_UDP_HEADER;
+		static constexpr int mtu_floor_size = TORRENT_INET_MIN_MTU - TORRENT_IPV4_HEADER - TORRENT_UDP_HEADER;
+		static constexpr int mtu_ceiling_size = TORRENT_ETHERNET_MTU - TORRENT_IPV4_HEADER - TORRENT_UDP_HEADER;
 		packet_slab m_syn_slab;
 		packet_slab m_mtu_floor_slab;
 		packet_slab m_mtu_ceiling_slab;

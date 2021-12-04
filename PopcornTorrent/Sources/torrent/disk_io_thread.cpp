@@ -281,7 +281,7 @@ constexpr disk_job_flags_t disk_interface::cache_hit;
 
 	void disk_io_thread::abort(bool const wait)
 	{
-		DLOG("disk_io_thread::abort: (%d)\n", int(wait));
+		DLOG("disk_io_thread::abort: (wait: %d)\n", int(wait));
 
 		// first make sure queued jobs have been submitted
 		// otherwise the queue may not get processed
@@ -1174,7 +1174,7 @@ constexpr disk_job_flags_t disk_interface::cache_hit;
 		// call. Each disk thread could hold its most recent understanding of the settings
 		// in a shared_ptr, and update it every time it wakes up from a job. That way
 		// each access to the settings won't require a std::mutex to be held.
-		if (storage && storage->m_settings == nullptr)
+		if (storage && storage->m_settings.load() == nullptr)
 			storage->m_settings = &m_settings;
 
 		TORRENT_ASSERT(static_cast<int>(j->action) < int(job_functions.size()));
@@ -1896,6 +1896,11 @@ constexpr disk_job_flags_t disk_interface::cache_hit;
 		{
 			disk_io_job *j = i.get();
 			if (j->storage != st) continue;
+			// only cancel volatile-read jobs. This means only full checking
+			// jobs. These jobs are likely to have a pretty deep queue and
+			// really gain from being cancelled. They can also be restarted
+			// easily.
+			if (!(j->flags & disk_interface::volatile_read)) continue;
 			j->flags |= disk_io_job::aborted;
 		}
 	}
@@ -2569,43 +2574,33 @@ constexpr disk_job_flags_t disk_interface::cache_hit;
 
 		TORRENT_ASSERT(j->storage->files().piece_length() > 0);
 
+		// always initialize the storage
+		j->storage->initialize(j->error);
+		if (j->error) return status_t::fatal_disk_error;
+
 		bool const verify_success = j->storage->verify_resume_data(*rd
 			, links ? *links : aux::vector<std::string, file_index_t>(), j->error);
 
-		// if we don't have any resume data, return
-		// or if error is set and return value is 'no_error' or 'need_full_check'
-		// the error message indicates that the fast resume data was rejected
-		// if 'fatal_disk_error' is returned, the error message indicates what
-		// when wrong in the disk access
-		if ((rd->have_pieces.empty() || !verify_success)
-			&& !m_settings.get_bool(settings_pack::no_recheck_incomplete_resume))
+		// j->error may have been set at this point, by verify_resume_data()
+		// it's important to not have it cleared out subsequent calls, as long
+		// as they succeed.
+
+		if (m_settings.get_bool(settings_pack::no_recheck_incomplete_resume))
+			return status_t::no_error;
+
+		if (!aux::contains_resume_data(*rd))
 		{
-			// j->error may have been set at this point, by verify_resume_data()
-			// it's important to not have it cleared out subsequent calls, as long
-			// as they succeed.
+			// if we don't have any resume data, we still may need to trigger a
+			// full re-check, if there are *any* files.
 			storage_error ignore;
-			if (j->storage->has_any_file(ignore))
-			{
-				// always initialize the storage
-				storage_error se;
-				j->storage->initialize(se);
-				if (se)
-				{
-					j->error = se;
-					return status_t::fatal_disk_error;
-				}
-				return status_t::need_full_check;
-			}
+			return (j->storage->has_any_file(ignore))
+				? status_t::need_full_check
+				: status_t::no_error;
 		}
 
-		storage_error se;
-		j->storage->initialize(se);
-		if (se)
-		{
-			j->error = se;
-			return status_t::fatal_disk_error;
-		}
-		return status_t::no_error;
+		return verify_success
+			? status_t::no_error
+			: status_t::need_full_check;
 	}
 
 	status_t disk_io_thread::do_rename_file(disk_io_job* j, jobqueue_t& /* completed_jobs */ )
@@ -2951,11 +2946,6 @@ constexpr disk_job_flags_t disk_interface::cache_hit;
 
 			m_generic_io_jobs.m_queued_jobs.push_front(fj);
 		}
-		else
-		{
-			TORRENT_ASSERT(!(fj->flags & disk_io_job::in_progress));
-			TORRENT_ASSERT(fj->blocked);
-		}
 
 		if (num_threads() == 0 && user_add)
 			immediate_execute();
@@ -3195,12 +3185,13 @@ constexpr disk_job_flags_t disk_interface::cache_hit;
 		// if we're not aborting, that means we just configured the thread pool to
 		// not have any threads (i.e. perform all disk operations in the network
 		// thread). In this case, the cleanup will happen in abort().
-		m_stats_counters.inc_stats_counter(counters::num_running_threads, -1);
-		if (--m_num_running_threads > 0 || !m_abort)
+		int const threads_left = --m_num_running_threads;
+		if (threads_left > 0 || !m_abort)
 		{
 			DLOG("exiting disk thread. num_threads: %d aborting: %d\n"
-				, num_threads(), int(m_abort));
+				, threads_left, int(m_abort));
 			TORRENT_ASSERT(m_magic == 0x1337);
+			m_stats_counters.inc_stats_counter(counters::num_running_threads, -1);
 			return;
 		}
 
@@ -3209,6 +3200,11 @@ constexpr disk_job_flags_t disk_interface::cache_hit;
 		// doesn't inadvertently trigger the code below when it thinks there are no
 		// more disk I/O threads running
 		l.unlock();
+
+		DLOG("last thread alive. (left: %d) cleaning up. (generic-jobs: %d hash-jobs: %d)\n"
+			, threads_left
+			, m_generic_io_jobs.m_queued_jobs.size()
+			, m_hash_io_jobs.m_queued_jobs.size());
 
 		// at this point, there are no queued jobs left. However, main
 		// thread is still running and may still have peer_connections
@@ -3235,6 +3231,7 @@ constexpr disk_job_flags_t disk_interface::cache_hit;
 		abort_jobs();
 
 		TORRENT_ASSERT(m_magic == 0x1337);
+		m_stats_counters.inc_stats_counter(counters::num_running_threads, -1);
 	}
 
 	void disk_io_thread::abort_jobs()
@@ -3351,6 +3348,12 @@ constexpr disk_job_flags_t disk_interface::cache_hit;
 
 		m_stats_counters.inc_stats_counter(counters::blocked_disk_jobs, -ret);
 		TORRENT_ASSERT(int(m_stats_counters[counters::blocked_disk_jobs]) >= 0);
+
+		if (m_abort.load())
+		{
+			// cancel all jobs
+			fail_jobs(storage_error(boost::asio::error::operation_aborted), new_jobs);
+		}
 
 		if (!new_jobs.empty())
 		{

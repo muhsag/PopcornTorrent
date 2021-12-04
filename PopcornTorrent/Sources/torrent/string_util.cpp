@@ -174,6 +174,7 @@ namespace libtorrent {
 			ret += ':';
 			ret += to_string(i.port).data();
 			if (i.ssl) ret += 's';
+			if (i.local) ret += 'l';
 		}
 
 		return ret;
@@ -202,7 +203,7 @@ namespace libtorrent {
 		while (!rest.empty())
 		{
 			string_view element;
-			std::tie(element, rest) = split_string(rest, ',');
+			std::tie(element, rest) = split_string_quotes(rest, ',');
 
 			element = strip_string(element);
 			if (element.size() > 1 && element.front() == '"' && element.back() == '"')
@@ -211,6 +212,7 @@ namespace libtorrent {
 
 			listen_interface_t iface;
 			iface.ssl = false;
+			iface.local = false;
 
 			string_view port;
 			if (element.front() == '[')
@@ -268,6 +270,7 @@ namespace libtorrent {
 				switch (c)
 				{
 					case 's': iface.ssl = true; break;
+					case 'l': iface.local = true; break;
 				}
 			}
 
@@ -278,9 +281,9 @@ namespace libtorrent {
 		return out;
 	}
 
-	// this parses the string that's used as the listen_interfaces setting.
-	// it is a comma-separated list of IP or device names with ports. For
-	// example: "eth0:6881,eth1:6881" or "127.0.0.1:6881"
+	// this parses the string that's used as the dht_bootstrap setting.
+	// it is a comma-separated list of IP or hostnames with ports. For
+	// example: "router.bittorrent.com:6881,router.utorrent.com:6881" or "127.0.0.1:6881"
 	void parse_comma_separated_string_port(std::string const& in
 		, std::vector<std::pair<std::string, int>>& out)
 	{
@@ -352,6 +355,13 @@ namespace libtorrent {
 	}
 
 	std::pair<string_view, string_view> split_string(string_view last, char const sep)
+	{
+		auto const pos = last.find(sep);
+		if (pos == string_view::npos) return {last, {}};
+		else return {last.substr(0, pos), last.substr(pos + 1)};
+	}
+
+	std::pair<string_view, string_view> split_string_quotes(string_view last, char const sep)
 	{
 		if (last.empty()) return {{}, {}};
 

@@ -84,11 +84,13 @@ namespace libtorrent {
 		std::string device;
 		int port;
 		bool ssl;
+		bool local;
 		friend bool operator==(listen_interface_t const& lhs, listen_interface_t const& rhs)
 		{
 			return lhs.device == rhs.device
 				&& lhs.port == rhs.port
-				&& lhs.ssl == rhs.ssl;
+				&& lhs.ssl == rhs.ssl
+				&& lhs.local == rhs.local;
 		}
 	};
 
@@ -128,6 +130,12 @@ namespace libtorrent {
 	// if no separator is found, the whole string is returned and the second
 	// return value is an empty string_view.
 	TORRENT_EXTRA_EXPORT std::pair<string_view, string_view> split_string(string_view last, char sep);
+
+	// same as split_string, but if one sub-string starts with a double quote
+	// (") separators are ignored until the end double-quote. Unless if the
+	// separator itself is a double quote.
+	TORRENT_EXTRA_EXPORT std::pair<string_view, string_view> split_string_quotes(
+		string_view last, char const sep);
 
 #if TORRENT_USE_I2P
 

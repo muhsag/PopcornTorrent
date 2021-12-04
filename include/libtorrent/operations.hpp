@@ -166,10 +166,19 @@ namespace libtorrent {
 
 		// create or read a symlink
 		symlink,
+
+		// handshake with a peer or server
+		handshake,
+
+		// set socket option
+		sock_option,
+
+		// enumeration network routes
+		enum_route,
 	};
 
 	// maps an operation id (from peer_error_alert and peer_disconnected_alert)
-	// to its name. See peer_connection for the constants
+	// to its name. See operation_t for the constants
 	TORRENT_EXPORT char const* operation_name(operation_t op);
 
 #if TORRENT_ABI_VERSION == 1

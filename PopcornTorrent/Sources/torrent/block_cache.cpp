@@ -294,13 +294,11 @@ static_assert(int(job_action_name.size()) == static_cast<int>(job_action_t::num_
 cached_piece_entry::cached_piece_entry()
 	: num_dirty(0)
 	, num_blocks(0)
-	, blocks_in_piece(0)
 	, hashing(0)
 	, hashing_done(0)
 	, marked_for_deletion(false)
 	, need_readback(false)
 	, cache_state(none)
-	, piece_refcount(0)
 	, outstanding_flush(0)
 	, outstanding_read(0)
 	, marked_for_eviction(false)
@@ -619,7 +617,7 @@ cached_piece_entry* block_cache::allocate_piece(disk_io_job const* j, std::uint1
 		pe.piece = j->piece;
 		pe.storage = j->storage;
 		pe.expire = aux::time_now();
-		pe.blocks_in_piece = aux::numeric_cast<std::uint64_t>(blocks_in_piece);
+		pe.blocks_in_piece = aux::numeric_cast<std::uint16_t>(blocks_in_piece);
 
 		pe.blocks.reset(new (std::nothrow) cached_block_entry[std::size_t(blocks_in_piece)]);
 		if (!pe.blocks) return nullptr;
@@ -1521,7 +1519,7 @@ void block_cache::check_invariant() const
 		for (list_iterator<cached_piece_entry> p = m_lru[i].iterate(); p.get(); p.next())
 		{
 			cached_piece_entry* pe = p.get();
-			TORRENT_PIECE_ASSERT(pe->cache_state == i, pe);
+			TORRENT_PIECE_ASSERT(int(pe->cache_state) == i, pe);
 			if (pe->num_dirty > 0)
 				TORRENT_PIECE_ASSERT(i == cached_piece_entry::write_lru, pe);
 
@@ -1604,10 +1602,10 @@ void block_cache::check_invariant() const
 			}
 			num_refcount += p.blocks[k].refcount;
 		}
-		TORRENT_PIECE_ASSERT(num_blocks == p.num_blocks, &p);
+		TORRENT_PIECE_ASSERT(num_blocks == int(p.num_blocks), &p);
 		TORRENT_PIECE_ASSERT(num_pending <= p.refcount, &p);
 		TORRENT_PIECE_ASSERT(num_refcount == p.refcount, &p);
-		TORRENT_PIECE_ASSERT(num_dirty == p.num_dirty, &p);
+		TORRENT_PIECE_ASSERT(num_dirty == int(p.num_dirty), &p);
 	}
 	TORRENT_ASSERT(m_read_cache_size == cached_read_blocks);
 	TORRENT_ASSERT(m_write_cache_size == cached_write_blocks);
