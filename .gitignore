@@ -8,4 +8,5 @@ DerivedData/
 *.xcworkspace
 PopcornTorrent/Build/
 .build/
+build_dependecies/
 .swiftpm/
