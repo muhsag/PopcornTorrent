@@ -52,6 +52,10 @@ using namespace libtorrent;
     NSDictionary<NSString *, id> *dictionary = [NSDictionary dictionaryWithContentsOfFile:pathToPlist];
     
     PTTorrentDownloadStatus downloadStatus = (PTTorrentDownloadStatus)[[dictionary objectForKey:PTTorrentItemPropertyDownloadStatus] integerValue];
+    // no downloading in progress yet
+    if (downloadStatus == PTTorrentDownloadStatusProcessing || downloadStatus == PTTorrentDownloadStatusDownloading) {
+        downloadStatus = PTTorrentDownloadStatusPaused;
+    }
     
     float progress = [[dictionary objectForKey:PTTorrentItemPropertyTorrentProgress] floatValue];
     
