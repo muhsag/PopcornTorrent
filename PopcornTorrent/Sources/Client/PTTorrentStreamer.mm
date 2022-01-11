@@ -253,7 +253,8 @@ using namespace libtorrent;
     torrent_handle th = _session->add_torrent(tp, ec_1);
     if (ec_1) {
         if (didTryFastResume) {
-            // retry streaming without fast resume
+            // retry streaming without fast resume, aka start from scratch
+            [[NSFileManager defaultManager] removeItemAtPath:self.savePath error:nil];
             [self cancelStreamingAndDeleteData:YES];
             [self startStreamingFromFileOrMagnetLink:filePathOrMagnetLink
                                        directoryName:directoryName
@@ -702,7 +703,7 @@ using namespace libtorrent;
 - (void) resumeDataReadyAlertWithData:(add_torrent_params)resumeData andSaveDirectory:(NSString*)directory{
     self.alertsQueue = nil;
     self.alertsLoopActive = NO;
-    _savePath = nil;
+    // _savePath = nil; do not clear this path as it might crash
     std::vector<torrent_handle> ths = _session->get_torrents();
     for(std::vector<torrent_handle>::size_type i = 0; i != ths.size(); i++) {
         _session->remove_torrent(ths[i]);

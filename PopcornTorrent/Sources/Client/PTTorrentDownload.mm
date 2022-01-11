@@ -59,9 +59,10 @@ using namespace libtorrent;
     NSDirectoryEnumerator *enumerator = [[NSFileManager defaultManager] enumeratorAtPath:savePath];
     NSString *fileName;
     
+    NSArray *supportedFiles = @[@"mp4", @"mkv", @"avi"];
     while (fileName = [enumerator nextObject]) {
         NSString *pathExtension = [fileName pathExtension];
-        if ([pathExtension isEqualToString: @"mp4"] || [pathExtension isEqualToString: @"mkv"]) break;
+        if ([supportedFiles containsObject:pathExtension]) break;
     }
     
     long long requiredSpace = [[[[NSFileManager defaultManager] attributesOfItemAtPath:[savePath stringByAppendingPathComponent:fileName] error:nil] objectForKey:NSFileSize] longLongValue];
