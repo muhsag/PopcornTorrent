@@ -187,6 +187,8 @@ bool is_downloading_state(int const st)
 		, m_storage_constructor(p.storage)
 		, m_added_time(p.added_time ? p.added_time : std::time(nullptr))
 		, m_completed_time(p.completed_time)
+		, m_last_seen_complete(p.last_seen_complete)
+		, m_swarm_last_seen_complete(p.last_seen_complete)
 		, m_info_hash(p.info_hash)
 		, m_error_file(torrent_status::error_file_none)
 		, m_sequence_number(-1)
@@ -1232,9 +1234,18 @@ bool is_downloading_state(int const st)
 		pause();
 	}
 
-	void torrent::on_piece_fail_sync(piece_index_t, piece_block) try
+	void torrent::on_piece_fail_sync(piece_index_t const piece, piece_block) try
 	{
 		if (m_abort) return;
+
+		// the user may have called force_recheck, which clears
+		// the piece picker
+		if (has_picker())
+		{
+			// unlock the piece and restore it, as if no block was
+			// ever downloaded for it.
+			m_picker->restore_piece(piece);
+		}
 
 		update_gauge();
 		// some peers that previously was no longer interesting may
@@ -8616,7 +8627,11 @@ bool is_downloading_state(int const st)
 		int seeds = 0;
 		int downloaders = 0;
 
-		if (m_complete != 0xffffff) seeds = m_complete;
+		// If we're currently seeding and using tracker supplied scrape
+		// data, we should remove ourselves from the seed count
+		int const self_seed = is_seed() && !is_paused() ? 1 : 0;
+
+		if (m_complete != 0xffffff) seeds = std::max(0, int(m_complete) - self_seed);
 		else seeds = m_peer_list ? m_peer_list->num_seeds() : 0;
 
 		if (m_incomplete != 0xffffff) downloaders = m_incomplete;
@@ -10610,7 +10625,8 @@ bool is_downloading_state(int const st)
 		if (flags & torrent_handle::piece_granularity)
 			return;
 
-		TORRENT_ASSERT(has_picker());
+		if (!has_picker())
+			return;
 
 		std::vector<piece_picker::downloading_piece> q = m_picker->get_download_queue();
 

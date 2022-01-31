@@ -288,12 +288,16 @@ namespace aux {
 
 				// we assume this listen_socket_t is local-network under some
 				// conditions, meaning we won't announce it to internet trackers
+				// if "routes" does not contain a single route to the internet,
+				// we don't use the last case. On MacOS, we can be notified of
+				// network changes *before* the routing table is updated
 				bool const local
 					= ipface.interface_address.is_loopback()
 					|| is_link_local(ipface.interface_address)
 					|| (ipface.flags & if_flags::loopback)
 					|| (!is_global(ipface.interface_address)
 						&& !(ipface.flags & if_flags::pointopoint)
+						&& has_any_internet_route(routes)
 						&& !has_internet_route(ipface.name, family(ipface.interface_address), routes));
 
 				eps.emplace_back(ipface.interface_address, uep.port, uep.device
@@ -1784,7 +1788,7 @@ namespace {
 		// change after the session is up and listening, at no other point
 		// set_proxy_settings is called with the correct proxy configuration,
 		// internally, this method handle the SOCKS5's connection logic
-		ret->udp_sock->sock.set_proxy_settings(proxy(), m_alerts);
+		ret->udp_sock->sock.set_proxy_settings(proxy(), m_alerts, get_resolver());
 
 		ADD_OUTSTANDING_ASYNC("session_impl::on_udp_packet");
 		ret->udp_sock->sock.async_read(aux::make_handler(std::bind(&session_impl::on_udp_packet
@@ -2746,12 +2750,6 @@ namespace {
 	{
 		TORRENT_ASSERT(is_single_thread());
 
-		// don't accept any connections from our local sockets if we're using a
-		// proxy
-		if (m_settings.get_int(settings_pack::proxy_type) != settings_pack::none
-			&& m_settings.get_bool(settings_pack::proxy_peer_connections))
-			return;
-
 		if (m_paused)
 		{
 #ifndef TORRENT_DISABLE_LOGGING
@@ -3581,7 +3579,7 @@ namespace {
 		if (m_dht)
 			m_dht->add_node(n);
 		else if (m_dht_nodes.size() >= 200)
-			m_dht_nodes[random(m_dht_nodes.size() - 1)] = n;
+			m_dht_nodes[random(uint32_t(m_dht_nodes.size()) - 1)] = n;
 		else
 			m_dht_nodes.push_back(n);
 	}
@@ -5380,7 +5378,7 @@ namespace {
 	void session_impl::update_proxy()
 	{
 		for (auto& i : m_listen_sockets)
-			i->udp_sock->sock.set_proxy_settings(proxy(), m_alerts);
+			i->udp_sock->sock.set_proxy_settings(proxy(), m_alerts, get_resolver());
 	}
 
 	void session_impl::update_ip_notifier()
