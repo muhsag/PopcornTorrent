@@ -578,13 +578,13 @@ using namespace libtorrent;
     NSDictionary *results = [savePathURL resourceValuesForKeys:@[NSURLVolumeAvailableCapacityKey] error:nil];
     NSNumber *availableSpace = results[NSURLVolumeAvailableCapacityKey];//get available space on device
     
-    if (_requiredSpace > availableSpace.longLongValue) {
-        NSString *description = [NSString localizedStringWithFormat:@"There is not enough space to download the torrent. Please clear at least %@ and try again.".localizedString, self.fileSize.stringValue];
-        NSError *error = [[NSError alloc] initWithDomain:@"com.popcorntimetv.popcorntorrent.error" code:-4 userInfo:@{NSLocalizedDescriptionKey: description}];
-        if (_failureBlock) _failureBlock(error);
-        [self cancelStreamingAndDeleteData:NO];
-        return;
-    }
+    //if (_requiredSpace > availableSpace.longLongValue) {
+    //   NSString *description = [NSString localizedStringWithFormat:@"There is not enough space to download the torrent. Please clear at least %@ and try again.".localizedString, self.fileSize.stringValue];
+    //    NSError *error = [[NSError alloc] initWithDomain:@"com.popcorntimetv.popcorntorrent.error" code:-4 userInfo:@{NSLocalizedDescriptionKey: description}];
+    //    if (_failureBlock) _failureBlock(error);
+    //    [self cancelStreamingAndDeleteData:NO];
+    //    return;
+    //}
     
     int file_index = [self indexOfLargestFileInTorrent:th];
     
